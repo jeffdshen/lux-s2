@@ -1,0 +1,19 @@
+name: lux-s2
+channels:
+  - pytorch
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.7.12
+  - numpy=1.21.6
+  - pip=22.1.2
+  - tqdm=4.64.0
+  - pytorch=1.11.0
+  - black=22.6.0
+  - scikit-learn=1.0.2
+  - matplotlib=3.5.2
+  - ipykernel=6.15.0
+  - ipywidgets=7.7.1
+  - wandb=0.12.21
+  - pip:
+    - luxai_s2
