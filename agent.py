@@ -1,7 +1,8 @@
+from anim.actor import agent_act
 from anim.state import AgentState
-from lux.kit import obs_to_game_state, GameState
+from lux.kit import obs_to_game_state
 from lux.config import EnvConfig
-from lux.utils import direction_to, my_turn_to_place_factory
+from lux.utils import direction_to
 import numpy as np
 import sys
 
@@ -23,6 +24,9 @@ class Agent:
         return agent_early_setup(self.state, step, obs, remainingOverageTime)
 
     def act(self, step: int, obs, remainingOverageTime: int = 60):
+        if self.player == "player_0":
+            agent_act(self.state, step, obs, remainingOverageTime)
+            return self.state.actions
         actions = dict()
 
         """

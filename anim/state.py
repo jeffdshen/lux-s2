@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from lux.config import EnvConfig
-from lux.kit import GameState
+from .lux import EnvConfig, GameState
+
 
 @dataclass
 class AgentState:
@@ -12,3 +12,4 @@ class AgentState:
     game: Optional[GameState] = None
     step: int = 0
     sorted_scores: Optional[List] = None
+    actions: Dict = None

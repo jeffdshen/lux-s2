@@ -10,38 +10,7 @@ from lux.config import EnvConfig
 from lux.utils import direction_to, my_turn_to_place_factory
 
 from .state import AgentState
-
-neighbors = [
-    (a, b) for a in range(-1, 2) for b in range(-1, 2) if 0 < abs(a) + abs(b) <= 1
-]
-
-
-def in_bounds(u, size):
-    return u[0] >= 0 and u[1] >= 0 and u[0] < size[0] and u[1] < size[1]
-
-
-def back_dijkstra(start: Tuple[int, int], rubble: np.ndarray):
-    dist = np.full_like(rubble, np.inf, dtype=np.float32)
-    seen = set()
-    dist[start] = 0
-    q = []
-    heapq.heappush(q, (dist[start], start))
-    while len(q) > 0:
-        d, u = heapq.heappop(q)
-        if u in seen:
-            continue
-        seen.add(u)
-        for n in neighbors:
-            v = (u[0] + n[0], u[1] + n[1])
-            if not in_bounds(v, rubble.shape):
-                continue
-            e = 1 + 0.05 * rubble[u]
-            next_d = dist[u] + e
-            if next_d < dist[v]:
-                dist[v] = next_d
-                heapq.heappush(q, (dist[v], v))
-
-    return dist
+from .utils import back_dijkstra
 
 
 def get_factory_dist(dist: np.ndarray):
@@ -61,8 +30,9 @@ def get_factory_dist(dist: np.ndarray):
 def get_score(rubble: np.ndarray, resource: np.ndarray, eps=1e-6):
     locs = np.argwhere(resource)
     score = np.zeros_like(rubble, dtype=np.float32)
+    cost = np.floor(1 + rubble * 0.05)
     for loc in locs:
-        dist = get_factory_dist(back_dijkstra(tuple(loc), rubble))
+        dist = get_factory_dist(back_dijkstra(tuple(loc), cost))
         score += 1 / (dist + eps)
     return score
 
