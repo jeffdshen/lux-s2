@@ -5,9 +5,9 @@ import heapq
 import numpy as np
 
 from .lux import Unit, MOVE_DELTAS, TO_DIRECTION, ActionType, Factory
-from .state import AgentState
 
 import sys
+
 
 def in_bounds(u, size):
     return u[0] >= 0 and u[1] >= 0 and u[0] < size[0] and u[1] < size[1]
@@ -64,6 +64,30 @@ def back_dijkstra(end: Tuple[int, int], cost: np.ndarray):
                 heapq.heappush(q, (dist[v], v))
 
     return dist
+
+
+class DijkstraCache:
+    def __init__(self):
+        self.f_dists: Dict[Tuple[Tuple[int, int], str], np.ndarray] = {}
+        self.b_dists: Dict[Tuple[Tuple[int, int], str], np.ndarray] = {}
+        self.costs: Dict[str, np.ndarray] = {}
+
+    def add_cost(self, name: str, cost: np.ndarray):
+        self.costs[name] = cost
+
+    def forward(self, start: Tuple[int, int], cost_name: str):
+        if (start, cost_name) not in self.f_dists:
+            cost = self.costs[cost_name]
+            self.f_dists[start, cost_name] = dijkstra(start, cost)
+
+        return self.f_dists[start, cost_name]
+
+    def backward(self, end: Tuple[int, int], cost_name: str):
+        if (end, cost_name) not in self.b_dists:
+            cost = self.costs[cost_name]
+            self.b_dists[end, cost_name] = back_dijkstra(end, cost)
+
+        return self.b_dists[end, cost_name]
 
 
 # only works for own units (cause recharge makes things complicated)
@@ -129,8 +153,12 @@ def _calculate_factory_neighbors():
     )
     return factory_neighbors.difference(factory)
 
+
 FACTORY_NEIGHBORS = list(_calculate_factory_neighbors())
-FACTORY_SPOTS = [(a, b) for a in range(-1, 2) for b in range(-1, 2) if 0 < abs(a) + abs(b)]
+FACTORY_SPOTS = [
+    (a, b) for a in range(-1, 2) for b in range(-1, 2) if 0 < abs(a) + abs(b)
+]
+
 
 def factory_outer(factories: Dict[str, Factory]):
     outer = set()
@@ -139,6 +167,7 @@ def factory_outer(factories: Dict[str, Factory]):
             loc = factory.pos + n
             outer.add(tuple(loc))
     return list(outer)
+
 
 def factory_spots(factories: Dict[str, Factory]):
     spots = set()

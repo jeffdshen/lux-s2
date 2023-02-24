@@ -1,12 +1,11 @@
 from collections import defaultdict
+from dataclasses import dataclass
 import heapq
 from typing import List, Set, Tuple
 
 import numpy as np
 
 from .utils import back_dijkstra, in_bounds, NEIGHBORS
-
-import sys
 
 
 def extend_path(path: List[Tuple[int, int]], max_turns: int = 100):
@@ -21,7 +20,7 @@ def extend_path(path: List[Tuple[int, int]], max_turns: int = 100):
 def multi_astar(
     starts: List[Tuple[int, int]],
     ends: List[Tuple[int, int]],
-    cost: np.ndarray,
+    costs: List[np.ndarray],
     existing_paths: List[List[Tuple[int, int]]],
     max_turns: int = 100,
 ):
@@ -33,7 +32,7 @@ def multi_astar(
             occupied.add((t, loc))
 
     paths = []
-    for start, end in zip(starts, ends):
+    for start, end, cost in zip(starts, ends, costs):
         h = back_dijkstra(end, cost)
         # TODO handle the case where end can be made unreachable
         # because of previous ends, e.g. previous units surround your

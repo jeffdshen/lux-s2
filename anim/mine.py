@@ -83,8 +83,11 @@ def make_mine(state: AgentState):
         if len(unit_path) > 1:
             loc = unit_path[-1]
             # print(loc, unit, file=sys.stderr)
-            objective_types.pop(loc)
+            objective_types.pop(loc, None)
             existing_paths.append(unit_path)
+            continue
+        objective_types.pop(tuple(unit.pos), None)
+
     for unit_id, unit in units.items():
         unit_path = unit_paths[unit_id]
         if len(unit_path) > 1:
@@ -109,11 +112,16 @@ def make_mine(state: AgentState):
                 continue
             while mines and mines[-1][-1] not in objective_types:
                 mines.pop()
+
             if mines:
-                loc = mines.pop()[-1]
-                objs.append(Objective(unit, loc, objective_types.pop(loc)))
-            else:
-                existing_paths.append(unit_path)
+                loc = mines[-1][-1]
+                dist = state.dijkstra.backward(loc, unit.unit_type)
+                if unit.power >= 2 * dist[tuple(unit.pos)] + unit.unit_cfg.DIG_COST * 6:
+                    loc = mines.pop()[-1]
+                    objs.append(Objective(unit, loc, objective_types.pop(loc)))
+                    continue
+
+            existing_paths.append(unit_path)
 
     # print(objs, file=sys.stderr)
     for path in existing_paths:
@@ -122,8 +130,12 @@ def make_mine(state: AgentState):
     # print("OBJS: ", objs, file=sys.stderr)
     starts = [tuple(obj.unit.pos) for obj in objs]
     ends = [obj.loc for obj in objs]
-    cost = np.floor(1 + board.rubble * 0.05)
-    paths = multi_astar(starts, ends, cost, existing_paths)
+    cost_dict = {
+        "LIGHT": np.floor(1 + board.rubble * 0.05),
+        "HEAVY": np.floor(20 + board.rubble),
+    }
+    costs = [cost_dict[obj.unit.unit_type] for obj in objs]
+    paths = multi_astar(starts, ends, costs, existing_paths)
     # print("PATHS: ", paths, file=sys.stderr)
     # print("ALL_PATHS", existing_paths, file=sys.stderr)
     for obj, path in zip(objs, paths):
