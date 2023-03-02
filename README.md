@@ -4,11 +4,12 @@
 
 ### copy files to bot folder
 ```
-cp -R anim lux agent.py main.py bots/v0.0.1
+mkdir bots/v0.0.X
+cp -R anim lux agent.py main.py bots/v0.0.X
 ```
 
 ### make submission
 ```
-(cd bots/v0.0.2 && tar -czvf ../../submission.tar.gz *)
+(cd bots/v0.0.X && tar -czvf ../../submission.tar.gz *)
 ```
 The parentheses are important if you want to end up back in the same directory.
