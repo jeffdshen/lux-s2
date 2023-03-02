@@ -1,10 +1,11 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 import heapq
 
 import numpy as np
 
-from .lux import Unit, MOVE_DELTAS, TO_DIRECTION, ActionType, Factory
+from .lux import Unit, MOVE_DELTAS, TO_DIRECTION, ActionType, Factory, UnitConfig, GameState
 
 import sys
 
@@ -66,6 +67,15 @@ def back_dijkstra(end: Tuple[int, int], cost: np.ndarray):
     return dist
 
 
+@dataclass
+class Zones:
+    dist: np.ndarray
+    zone: np.ndarray
+    to_loc: Dict[int, Tuple[int, int]]
+    from_loc: Dict[Tuple[int, int], int]
+    to_id: Dict[int, str]
+
+
 class DijkstraCache:
     def __init__(self):
         self.f_dists: Dict[Tuple[Tuple[int, int], str], np.ndarray] = {}
@@ -88,6 +98,34 @@ class DijkstraCache:
             self.b_dists[end, cost_name] = back_dijkstra(end, cost)
 
         return self.b_dists[end, cost_name]
+
+
+class ZonesCache:
+    def __init__(self, dcache: DijkstraCache):
+        self.dcache = dcache
+        self.zones: Dict[Tuple[str, str], Zones] = {}
+
+    def get_zone(self, zone_type: str, cost_name: str):
+        return self.zones[zone_type, cost_name]
+
+    def make_zones(
+        self, zone_type: str, cost_name: str, locs: List[Tuple[Tuple[int, int], str]]
+    ):
+        dists = []
+        to_loc = {}
+        from_loc = {}
+        to_id = {}
+        for idx, (loc, name) in enumerate(locs):
+            dists.append(self.dcache.backward(loc, cost_name))
+            to_id[idx] = name
+            to_loc[idx] = loc
+            from_loc[loc] = idx
+
+        dists = np.stack(dists)
+        dist = np.min(dists, axis=0)
+        zone = np.argmin(dists, axis=0)
+
+        self.zones[zone_type, cost_name] = Zones(dist, zone, to_loc, from_loc, to_id)
 
 
 # only works for own units (cause recharge makes things complicated)
@@ -122,30 +160,6 @@ def path_to_action_queue(unit: Unit, path: List[Tuple[int, int]]):
     return [unit.move(d, n=n) for d, n in cmp_dirs]
 
 
-@dataclass
-class Zones:
-    dist: np.ndarray
-    zone: np.ndarray
-    to_id: Dict[int, str]
-    from_id: Dict[str, int]
-
-
-def factory_zones(rubble: np.ndarray, factories: Dict[str, Factory]):
-    dists = []
-    to_id = {}
-    from_id = {}
-    cost = np.floor(1 + rubble * 0.05)
-    for idx, (fid, factory) in enumerate(factories.items()):
-        dists.append(dijkstra(tuple(factory.pos), cost))
-        to_id[idx] = fid
-        from_id[fid] = idx
-
-    dists = np.stack(dists)
-    dist = np.min(dists, axis=0)
-    zone = np.argmin(dists, axis=0)
-    return Zones(dist, zone, to_id, from_id)
-
-
 def _calculate_factory_neighbors():
     factory = set([(a, b) for a in range(-1, 2) for b in range(-1, 2)])
     factory_neighbors = set(
@@ -176,6 +190,15 @@ def factory_spots(factories: Dict[str, Factory]):
             loc = factory.pos + n
             spots.add(tuple(loc))
     return list(spots)
+
+
+def named_factory_spots(factories: Dict[str, Factory]):
+    spots = list()
+    for fid, factory in factories.items():
+        for n in FACTORY_SPOTS:
+            loc = factory.pos + n
+            spots.append((tuple(loc), fid))
+    return spots
 
 
 def add_locs(u: Tuple[int, int], v: Tuple[int, int]):

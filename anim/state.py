@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .lux import EnvConfig, GameState
-from .utils import DijkstraCache
+from .utils import DijkstraCache, ZonesCache
 
 
 @dataclass
@@ -15,5 +15,6 @@ class AgentState:
     game: Optional[GameState] = None
     step: int = 0
     sorted_scores: Optional[List] = None
-    actions: Dict = None
-    dijkstra: DijkstraCache = None
+    actions: Optional[Dict] = None
+    dcache: Optional[DijkstraCache] = None
+    zcache: Optional[ZonesCache] = None

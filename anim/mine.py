@@ -19,11 +19,9 @@ from .lux import (
 from .nav import extend_path, multi_astar
 from .utils import (
     Zones,
-    dijkstra,
     action_queue_to_path,
     factory_spots,
     path_to_action_queue,
-    factory_zones,
 )
 
 
@@ -61,8 +59,7 @@ def make_mine(state: AgentState):
     units = state.game.units[state.player]
     factories = state.game.factories[state.player]
     board = state.game.board
-    zones = factory_zones(board.rubble, factories)
-    mines = get_mine_locations(zones, board)
+    mines = get_mine_locations(state.zcache.get_zone("FACTORY_SPOT", "LIGHT"), board)
     spots = factory_spots(factories)
     unit_paths = get_paths(units)
     objective_types = {}
@@ -115,7 +112,7 @@ def make_mine(state: AgentState):
 
             if mines:
                 loc = mines[-1][-1]
-                dist = state.dijkstra.backward(loc, unit.unit_type)
+                dist = state.dcache.backward(loc, unit.unit_type)
                 if unit.power >= 2 * dist[tuple(unit.pos)] + unit.unit_cfg.DIG_COST * 6:
                     loc = mines.pop()[-1]
                     objs.append(Objective(unit, loc, objective_types.pop(loc)))
