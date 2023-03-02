@@ -1,4 +1,3 @@
-
 from enum import Enum
 
 from lux.cargo import UnitCargo
@@ -12,10 +11,9 @@ import lux.unit
 
 from lux.utils import my_turn_to_place_factory
 
-MOVE_DELTAS = lux.unit.move_deltas 
-TO_DIRECTION = {
-    tuple(delta): i for i, delta in enumerate(MOVE_DELTAS)
-}
+MOVE_DELTAS = lux.unit.move_deltas
+TO_DIRECTION = {tuple(delta): i for i, delta in enumerate(MOVE_DELTAS)}
+
 
 class ActionType(Enum):
     MOVE = 0
@@ -24,6 +22,12 @@ class ActionType(Enum):
     DIG = 3
     SELF_DESTRUCT = 4
     RECHARGE = 5
+
+
+class UnitType(Enum):
+    LIGHT = 0
+    HEAVY = 1
+
 
 class ResourceType(Enum):
     ICE = 0
