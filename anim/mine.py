@@ -154,7 +154,7 @@ def make_mine(state: AgentState):
             q.append(
                 obj.unit.transfer(TO_DIRECTION[0, 0], transfer_type, transfer_amount)
             )
-        state.actions[obj.unit.unit_id] = q
+        state.actions[obj.unit.unit_id] = q[:20]
     # print("ACTIONS: ", state.actions, file=sys.stderr)
 
 
