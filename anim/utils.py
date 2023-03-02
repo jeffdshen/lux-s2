@@ -176,3 +176,11 @@ def factory_spots(factories: Dict[str, Factory]):
             loc = factory.pos + n
             spots.add(tuple(loc))
     return list(spots)
+
+
+def add_locs(u: Tuple[int, int], v: Tuple[int, int]):
+    return (u[0] + v[0], u[1] + v[1])
+
+
+def sub_locs(u: Tuple[int, int], v: Tuple[int, int]):
+    return (u[0] - v[0], u[1] - v[1])
