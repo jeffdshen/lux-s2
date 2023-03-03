@@ -1,6 +1,9 @@
 ## lux-s2
 replays/
 bots/
+build/
+docker_build/
+submission.tar.gz
 
 ## Mac
 .DS_Store
