@@ -4,6 +4,7 @@ bots/
 build/
 docker_build/
 submission.tar.gz
+src/Eigen/
 
 ## Mac
 .DS_Store

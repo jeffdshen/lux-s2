@@ -22,7 +22,8 @@ if(${BUILD_WARNINGS})
     add_compile_options(
         -Wall
     )
-    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         add_compile_options(
             -W3
         )

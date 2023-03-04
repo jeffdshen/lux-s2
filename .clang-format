@@ -1,0 +1,16 @@
+BasedOnStyle: LLVM
+AccessModifierOffset: -1
+AlignAfterOpenBracket: AlwaysBreak
+AlignOperands:   DontAlign
+AlignTrailingComments: false
+AllowShortFunctionsOnASingleLine: Inline
+AlwaysBreakBeforeMultilineStrings: true
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+BreakStringLiterals: false
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+PenaltyBreakBeforeFirstCallParameter: 1
+PenaltyReturnTypeOnItsOwnLine: 200
+PointerAlignment: Left
