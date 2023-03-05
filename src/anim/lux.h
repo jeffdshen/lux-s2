@@ -1,3 +1,4 @@
+#pragma once
 
 #include "lux/action.hpp"
 #include "lux/board.hpp"

@@ -70,9 +70,23 @@ struct AgentState {
   int64_t overage_time = 0;
   std::vector<std::pair<double, Loc>> sorted_scores;
   Actions actions;
-  // dcache: Optional[DijkstraCache] = None
-  // zcache: Optional[ZonesCache] = None
+  DijkstraCache dcache;
+  ZonesCache zcache;
 };
+
+inline Eigen::ArrayXXd make_cost(
+    const std::string& name, const AgentState& state) {
+  auto& rubble = state.game.board.rubble;
+  auto& unit_cfg = state.env_cfg.ROBOTS[name];
+  Eigen::ArrayXXd cost =
+      (unit_cfg.MOVE_COST + rubble * unit_cfg.RUBBLE_MOVEMENT_COST).floor();
+  auto& enemy_factories = state.game.factories.at(state.opp_player);
+  for (auto& [_, factory] : enemy_factories) {
+    auto& pos = factory.pos;
+    cost.block(pos.x - 1, pos.y - 1, 3, 3) = INF;
+  }
+  return cost;
+}
 
 inline void state_reset(
     AgentState& state,
@@ -80,18 +94,26 @@ inline void state_reset(
     int64_t step,
     const lux::Observation& obs,
     int64_t remainingOverageTime) {
-  state.player = player;
-  state.step = step;
+  state.env_cfg = obs.config;
   state.game.reset(obs);
+  state.player = player;
   state.opp_player = player == "player_0" ? "player_1" : "player_0";
-  state.actions = {};
+  state.step = step;
   state.overage_time = remainingOverageTime;
-  // state.dcache = DijkstraCache()
-  // state.dcache.add_cost("LIGHT", make_cost("LIGHT", state))
-  // state.dcache.add_cost("HEAVY", make_cost("HEAVY", state))
-  // factory_spots = named_factory_spots(state.game.factories[state.player])
-  // state.zcache = ZonesCache(state.dcache)
-  // state.zcache.make_zones("FACTORY_SPOT", "LIGHT", factory_spots)
-  // state.zcache.make_zones("FACTORY_SPOT", "HEAVY", factory_spots)
+
+  // Don't reset sorted_scores
+
+  state.actions = {};
+
+  state.dcache = DijkstraCache{};
+  state.dcache.add_cost("LIGHT", make_cost("LIGHT", state));
+  state.dcache.add_cost("HEAVY", make_cost("HEAVY", state));
+
+  auto factory_spots = named_factory_spots(state.game.factories[state.player]);
+  state.zcache = ZonesCache{};
+  state.zcache.dcache = &state.dcache;
+  state.zcache.make_zones("FACTORY_SPOT", "LIGHT", factory_spots);
+  state.zcache.make_zones("FACTORY_SPOT", "HEAVY", factory_spots);
 }
+
 } // namespace anim

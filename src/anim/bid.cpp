@@ -37,10 +37,9 @@ Eigen::ArrayXXd get_score(
 }
 
 std::vector<std::pair<double, Loc>> make_sorted_scores(
-    const BoardState& board) {
-  auto cost = board.rubble;
-  cost *= 0.05;
-  cost += 1;
+    const AgentState& state) {
+  auto& board = state.game.board;
+  auto& cost = state.dcache.costs.at("HEAVY");
   auto& ice = board.ice;
   auto& ore = board.ore;
   auto& spawns = board.valid_spawns_mask;
@@ -56,12 +55,13 @@ std::vector<std::pair<double, Loc>> make_sorted_scores(
     double score = overall(loc.first, loc.second);
     sorted_scores.emplace_back(score, loc);
   }
+  std::sort(sorted_scores.begin(), sorted_scores.end(), std::greater<>());
   return sorted_scores;
 }
 } // namespace
 
 lux::BidAction make_bid(AgentState& state) {
-  state.sorted_scores = make_sorted_scores(state.game.board);
+  state.sorted_scores = make_sorted_scores(state);
   return {"AlphaStrike", 0};
 }
 

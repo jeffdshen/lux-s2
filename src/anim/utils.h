@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <queue>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -23,8 +24,13 @@ inline Loc sub(const Loc& a, const Loc& b) {
   return {a.first - b.first, a.second - b.second};
 }
 
+inline Loc to_loc(const lux::Position& pos) {
+  return {pos.x, pos.y};
+}
+
 struct LocHash {
   int64_t m;
+  LocHash() : LocHash(MAX_SIZE) {}
   LocHash(int64_t m) : m(m) {}
 
   size_t operator()(const Loc& x) const { return x.first * m + x.second; }
@@ -82,12 +88,12 @@ Eigen::ArrayXXd dijkstra(
     std::vector<Loc> starts, const Eigen::ArrayXXd& cost, F cost_f) {
   Eigen::ArrayXXd dist =
       Eigen::ArrayXXd::Constant(cost.rows(), cost.cols(), INF);
-  std::unordered_set<Loc, LocHash> seen(MAX_SIZE * MAX_SIZE, LocHash(MAX_SIZE));
+  std::unordered_set<Loc, LocHash> seen(MAX_SIZE * MAX_SIZE);
   for (auto& start : starts) {
     dist(start.first, start.second) = 0;
   }
   using Score = std::pair<double, Loc>;
-  std::priority_queue<Score> q;
+  std::priority_queue<Score, std::vector<Score>, std::greater<Score>> q;
   for (auto& start : starts) {
     auto d = dist(start.first, start.second);
     q.emplace(d, start);
@@ -116,4 +122,190 @@ Eigen::ArrayXXd dijkstra(
   return dist;
 }
 
+struct DijkstraCache {
+  std::unordered_map<
+      std::string,
+      std::unordered_map<Loc, Eigen::ArrayXXd, LocHash>>
+      f_dists;
+  std::unordered_map<
+      std::string,
+      std::unordered_map<Loc, Eigen::ArrayXXd, LocHash>>
+      b_dists;
+  std::unordered_map<std::string, std::map<std::vector<Loc>, Eigen::ArrayXXd>>
+      b_multi_dists;
+  std::unordered_map<std::string, Eigen::ArrayXXd> costs;
+
+  // Move only
+  DijkstraCache() = default;
+  DijkstraCache(const DijkstraCache& other) = delete;
+  DijkstraCache& operator=(const DijkstraCache& other) = delete;
+  DijkstraCache(DijkstraCache&& other) noexcept = default;
+  DijkstraCache& operator=(DijkstraCache&& other) noexcept = default;
+  ~DijkstraCache() = default;
+
+  void add_cost(std::string name, Eigen::ArrayXXd cost) {
+    costs.emplace(std::move(name), std::move(cost));
+  }
+
+  const Eigen::ArrayXXd& forward(const Loc& start, const std::string& name) {
+    auto& dist = f_dists[name];
+    if (auto it = dist.find(start); it != dist.end()) {
+      return it->second;
+    }
+
+    auto& cost = costs.at(name);
+    auto [it, _] = dist.emplace(start, dijkstra({start}, cost, forwards));
+    return it->second;
+  }
+
+  const Eigen::ArrayXXd& backward(const Loc& end, const std::string& name) {
+    auto& dist = b_dists[name];
+    if (auto it = dist.find(end); it != dist.end()) {
+      return it->second;
+    }
+
+    auto& cost = costs.at(name);
+    auto [it, _] = dist.emplace(end, dijkstra({end}, cost, backwards));
+    return it->second;
+  }
+
+  const Eigen::ArrayXXd& backward(
+      const std::vector<Loc>& ends, const std::string& name) {
+    if (ends.size() == 1) {
+      return backward(ends[0], name);
+    }
+
+    std::vector<Loc> e{ends};
+    std::sort(std::begin(e), std::end(e));
+    auto& dist = b_multi_dists[name];
+    if (auto it = dist.find(e); it != dist.end()) {
+      return it->second;
+    }
+
+    auto& cost = costs.at(name);
+    auto [it, _] = dist.emplace(e, dijkstra(e, cost, backwards));
+    return it->second;
+  }
+};
+
+// A zone for groups of locs
+struct Zones {
+  Eigen::ArrayXXd dist;
+  Eigen::ArrayXXd zone;
+  std::vector<std::vector<Loc>> to_loc;
+  std::unordered_map<Loc, size_t, LocHash> from_loc{MAX_SIZE * MAX_SIZE};
+  std::vector<std::string> to_id;
+
+  // Move only
+  Zones() = default;
+  Zones(const Zones& other) = delete;
+  Zones& operator=(const Zones& other) = delete;
+  Zones(Zones&& other) noexcept = default;
+  Zones& operator=(Zones&& other) noexcept = default;
+  ~Zones() = default;
+};
+
+struct ZonesCache {
+  DijkstraCache* dcache = nullptr;
+  std::unordered_map<std::string, std::unordered_map<std::string, Zones>> zones;
+
+  Zones& get_zone(const std::string& zone_type, const std::string& cost_name) {
+    return zones.at(zone_type).at(cost_name);
+  }
+
+  void make_zones(
+      const std::string& zone_type,
+      const std::string& cost_name,
+      const std::vector<std::pair<std::vector<Loc>, std::string>>& loc_groups) {
+    Zones zone;
+    if (loc_groups.empty()) {
+      zones[zone_type][cost_name] = std::move(zone);
+      return;
+    }
+    std::vector<const Eigen::ArrayXXd*> dists;
+    for (size_t i = 0; i < loc_groups.size(); i++) {
+      auto& [locs, name] = loc_groups[i];
+      dists.emplace_back(&dcache->backward(locs, cost_name));
+      zone.to_id.emplace_back(name);
+      zone.to_loc.emplace_back(locs);
+      for (auto& loc : locs) {
+        zone.from_loc[loc] = i;
+      }
+    }
+    auto rows = dists[0]->rows();
+    auto cols = dists[0]->cols();
+    Eigen::ArrayXXd dist = *dists[0];
+    Eigen::ArrayXXd idx = Eigen::ArrayXXd::Zero(rows, cols);
+    for (Eigen::Index x = 0; x < rows; x++) {
+      for (Eigen::Index y = 0; y < cols; y++) {
+        for (size_t i = 1; i < dists.size(); i++) {
+          if (dist(x, y) > (*dists[i])(x, y)) {
+            dist(x, y) = (*dists[i])(x, y);
+            idx(x, y) = i;
+          }
+        }
+      }
+    }
+    zone.dist = std::move(dist);
+    zone.zone = std::move(idx);
+    zones[zone_type][cost_name] = std::move(zone);
+  }
+};
+
+const std::vector<Loc> FACTORY_SPOTS = {
+    {-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
+
+inline std::vector<Loc> factory_spots(
+    const std::map<std::string, lux::Factory>& factories) {
+  std::vector<Loc> spots;
+  for (auto& [fid, factory] : factories) {
+    for (auto& n : FACTORY_SPOTS) {
+      spots.emplace_back(add(to_loc(factory.pos), n));
+    }
+  }
+  return spots;
+}
+
+inline std::vector<std::pair<std::vector<Loc>, std::string>>
+named_factory_spots(const std::map<std::string, lux::Factory>& factories) {
+  std::vector<std::pair<std::vector<Loc>, std::string>> spots;
+  for (auto& [fid, factory] : factories) {
+    spots.emplace_back();
+    spots.back().second = fid;
+    spots.back().first.reserve(FACTORY_SPOTS.size());
+    for (auto& n : FACTORY_SPOTS) {
+      spots.back().first.emplace_back(add(to_loc(factory.pos), n));
+    }
+  }
+  return spots;
+}
 } // namespace anim
+
+// # only works for own units (cause recharge makes things complicated)
+// def action_queue_to_path(loc: np.ndarray, action_queue: np.ndarray):
+//     loc = np.copy(loc)
+//     path = [tuple(loc)]
+//     for action in action_queue:
+//         action = tuple(action)
+//         move = 0
+//         if action[0] == ActionType.MOVE.value:
+//             move = action[1]
+//         move_delta = MOVE_DELTAS[move]
+//         for i in range(action[5]):
+//             loc += move_delta
+//             path.append(tuple(loc))
+//     return path
+
+// def path_to_action_queue(unit: Unit, path: List[Tuple[int, int]]):
+//     deltas = [(a[0] - b[0], a[1] - b[1]) for a, b in zip(path[1:],
+//     path[:-1])] dirs = [TO_DIRECTION[delta] for delta in deltas] cmp_dirs =
+//     [] for d in dirs:
+//         if not cmp_dirs:
+//             cmp_dirs.append([d, 1])
+//             continue
+//         if cmp_dirs[-1][0] == d:
+//             cmp_dirs[-1][1] += 1
+//         else:
+//             cmp_dirs.append([d, 1])
+
+//     return [unit.move(d, n=n) for d, n in cmp_dirs]

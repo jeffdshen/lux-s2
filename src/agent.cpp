@@ -11,6 +11,7 @@ json Agent::setup() {
 }
 
 json Agent::act() {
+  agent_act(state, player, step, obs, remainingOverageTime);
   json actions = json::object();
   for (const auto& [unitId, factory] : obs.factories[player]) {
     if (step % 4 < 3 && factory.canBuildLight(obs)) {
