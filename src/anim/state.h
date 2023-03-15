@@ -11,19 +11,8 @@
 
 namespace anim {
 struct Actions {
-  std::map<std::string, lux::FactoryAction> factories;
-  std::map<std::string, std::vector<lux::UnitAction>> units;
-
-  json to_json() {
-    json actions = json::object();
-    for (auto& [unit_id, action] : factories) {
-      actions[unit_id] = action;
-    }
-    for (auto& [unit_id, action] : units) {
-      actions[unit_id] = action;
-    }
-    return actions;
-  }
+  std::map<size_t, lux::FactoryAction> factories;
+  std::map<size_t, std::vector<lux::UnitAction>> units;
 };
 
 struct BoardState {
@@ -39,9 +28,9 @@ struct BoardState {
 
 struct GameState {
   BoardState board;
-  std::map<std::string, std::map<std::string, lux::Unit>> units;
-  std::map<std::string, lux::Team> teams;
-  std::map<std::string, std::map<std::string, lux::Factory>> factories;
+  std::vector<std::vector<lux::Unit>> units;
+  std::vector<lux::Team> teams;
+  std::vector<std::vector<lux::Factory>> factories;
   int64_t real_env_steps;
   lux::EnvConfig config;
 
@@ -53,9 +42,39 @@ struct GameState {
     board.rubble = to_eigen(obs.board.rubble);
     board.valid_spawns_mask = to_eigen(obs.board.valid_spawns_mask);
     board.factory_occupancy = to_eigen(obs.board.factory_occupancy);
-    units = obs.units;
-    teams = obs.teams;
-    factories = obs.factories;
+
+    units.clear();
+    teams.clear();
+    factories.clear();
+
+    for (size_t i = 0; i < 2; i++) {
+      auto player = "player_" + std::to_string(i);
+
+      {
+        units.emplace_back();
+        auto& all_units = obs.units.at(player);
+        units[i].reserve(all_units.size());
+        for (auto& [_, unit] : all_units) {
+          units[i].emplace_back(unit);
+        }
+      }
+
+      // teams doesn't exist at bidding.
+      if (!obs.teams.contains(player)) {
+        teams.emplace_back();
+      } else {
+        teams.emplace_back(obs.teams.at(player));
+      }
+
+      {
+        factories.emplace_back();
+        auto& all_factories = obs.factories.at(player);
+        factories[i].reserve(all_factories.size());
+        for (auto& [_, factory] : all_factories) {
+          factories[i].emplace_back(factory);
+        }
+      }
+    }
     real_env_steps = obs.real_env_steps;
     config = obs.config;
   }
@@ -64,14 +83,27 @@ struct GameState {
 struct AgentState {
   lux::EnvConfig env_cfg;
   GameState game;
-  std::string player;
-  std::string opp_player;
+  std::size_t player;
+  std::size_t opp_player;
   int64_t step = 0;
   int64_t overage_time = 0;
   std::vector<std::pair<double, Loc>> sorted_scores;
   Actions actions;
   DijkstraCache dcache;
   ZonesCache zcache;
+
+  json get_actions_json() {
+    json res = json::object();
+    for (auto& [idx, action] : actions.factories) {
+      std::string unit_id = game.factories[player][idx].unit_id;
+      res[unit_id] = action;
+    }
+    for (auto& [idx, action] : actions.units) {
+      std::string unit_id = game.units[player][idx].unit_id;
+      res[unit_id] = action;
+    }
+    return res;
+  }
 };
 
 inline Eigen::ArrayXXd make_cost(
@@ -81,7 +113,7 @@ inline Eigen::ArrayXXd make_cost(
   Eigen::ArrayXXd cost =
       (unit_cfg.MOVE_COST + rubble * unit_cfg.RUBBLE_MOVEMENT_COST).floor();
   auto& enemy_factories = state.game.factories.at(state.opp_player);
-  for (auto& [_, factory] : enemy_factories) {
+  for (auto& factory : enemy_factories) {
     auto& pos = factory.pos;
     cost.block(pos.x - 1, pos.y - 1, 3, 3) = INF;
   }
@@ -96,8 +128,8 @@ inline void state_reset(
     int64_t remainingOverageTime) {
   state.env_cfg = obs.config;
   state.game.reset(obs);
-  state.player = player;
-  state.opp_player = player == "player_0" ? "player_1" : "player_0";
+  state.player = player == "player_1";
+  state.opp_player = 1 - state.player;
   state.step = step;
   state.overage_time = remainingOverageTime;
 

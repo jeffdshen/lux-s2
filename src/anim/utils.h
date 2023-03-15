@@ -8,11 +8,14 @@
 
 #include <Eigen/Dense>
 
+#include "anim/lux.h"
+
 namespace anim {
 const int MAX_SIZE = 64;
 const double INF = std::numeric_limits<double>::infinity();
 
 using Loc = std::pair<int32_t, int32_t>;
+using TimeLoc = std::pair<int32_t, Loc>;
 
 const std::vector<Loc> NEIGHBORS{{-1, 0}, {0, -1}, {0, 1}, {1, 0}};
 
@@ -28,12 +31,26 @@ inline Loc to_loc(const lux::Position& pos) {
   return {pos.x, pos.y};
 }
 
+inline Loc add(const Loc& a, const lux::Direction& d) {
+  return add(a, to_loc(lux::Position::Delta(d)));
+}
+
 struct LocHash {
   int64_t m;
   LocHash() : LocHash(MAX_SIZE) {}
   LocHash(int64_t m) : m(m) {}
 
   size_t operator()(const Loc& x) const { return x.first * m + x.second; }
+};
+
+struct TimeLocHash {
+  int64_t m;
+  TimeLocHash() : TimeLocHash(MAX_SIZE) {}
+  TimeLocHash(int64_t m) : m(m) {}
+
+  size_t operator()(const TimeLoc& x) const {
+    return m * m * x.first + x.second.first * m + x.second.second;
+  }
 };
 
 inline Loc shape(const Eigen::ArrayXXd& m) {
@@ -75,6 +92,18 @@ std::vector<Loc> argwhere(const Eigen::ArrayXXd& x, F f) {
   return res;
 }
 
+template <
+    class Map,
+    typename Key = typename Map::key_type,
+    typename Value = typename Map::mapped_type>
+typename Map::mapped_type get_default(
+    const Map& map, const Key& key, const typename Map::mapped_type& value) {
+  if (auto pos = map.find(key); pos != map.end()) {
+    return pos->second;
+  }
+  return value;
+}
+
 inline double forwards(const Loc&, const Loc& v, const Eigen::ArrayXXd& cost) {
   return cost(v.first, v.second);
 }
@@ -89,14 +118,11 @@ Eigen::ArrayXXd dijkstra(
   Eigen::ArrayXXd dist =
       Eigen::ArrayXXd::Constant(cost.rows(), cost.cols(), INF);
   std::unordered_set<Loc, LocHash> seen(MAX_SIZE * MAX_SIZE);
-  for (auto& start : starts) {
-    dist(start.first, start.second) = 0;
-  }
   using Score = std::pair<double, Loc>;
   std::priority_queue<Score, std::vector<Score>, std::greater<Score>> q;
   for (auto& start : starts) {
-    auto d = dist(start.first, start.second);
-    q.emplace(d, start);
+    dist(start.first, start.second) = 0.0;
+    q.emplace(0.0, start);
   }
   while (!q.empty()) {
     auto [d, u] = q.top();
@@ -194,7 +220,7 @@ struct Zones {
   Eigen::ArrayXXd zone;
   std::vector<std::vector<Loc>> to_loc;
   std::unordered_map<Loc, size_t, LocHash> from_loc{MAX_SIZE * MAX_SIZE};
-  std::vector<std::string> to_id;
+  std::vector<size_t> to_id;
 
   // Move only
   Zones() = default;
@@ -216,7 +242,7 @@ struct ZonesCache {
   void make_zones(
       const std::string& zone_type,
       const std::string& cost_name,
-      const std::vector<std::pair<std::vector<Loc>, std::string>>& loc_groups) {
+      const std::vector<std::pair<std::vector<Loc>, std::size_t>>& loc_groups) {
     Zones zone;
     if (loc_groups.empty()) {
       zones[zone_type][cost_name] = std::move(zone);
@@ -256,9 +282,9 @@ const std::vector<Loc> FACTORY_SPOTS = {
     {-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
 
 inline std::vector<Loc> factory_spots(
-    const std::map<std::string, lux::Factory>& factories) {
+    const std::vector<lux::Factory>& factories) {
   std::vector<Loc> spots;
-  for (auto& [fid, factory] : factories) {
+  for (auto& factory : factories) {
     for (auto& n : FACTORY_SPOTS) {
       spots.emplace_back(add(to_loc(factory.pos), n));
     }
@@ -266,12 +292,13 @@ inline std::vector<Loc> factory_spots(
   return spots;
 }
 
-inline std::vector<std::pair<std::vector<Loc>, std::string>>
-named_factory_spots(const std::map<std::string, lux::Factory>& factories) {
-  std::vector<std::pair<std::vector<Loc>, std::string>> spots;
-  for (auto& [fid, factory] : factories) {
+inline std::vector<std::pair<std::vector<Loc>, size_t>> named_factory_spots(
+    const std::vector<lux::Factory>& factories) {
+  std::vector<std::pair<std::vector<Loc>, size_t>> spots;
+  for (size_t i = 0; i < factories.size(); i++) {
+    auto& factory = factories[i];
     spots.emplace_back();
-    spots.back().second = fid;
+    spots.back().second = i;
     spots.back().first.reserve(FACTORY_SPOTS.size());
     for (auto& n : FACTORY_SPOTS) {
       spots.back().first.emplace_back(add(to_loc(factory.pos), n));

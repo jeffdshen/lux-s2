@@ -20,7 +20,7 @@ inline json agent_setup(
   }
 
   bool place_turn = step % 2 == obs.teams.at(player).place_first;
-  if (state.game.teams.at(player).factories_to_place && place_turn) {
+  if (state.game.teams.at(state.player).factories_to_place && place_turn) {
     return make_spawn(state);
   }
 
@@ -36,6 +36,6 @@ inline json agent_act(
   state_reset(state, player, step, obs, remainingOverageTime);
   //   build(state);
   //   make_mine(state);
-  return state.actions.to_json();
+  return state.get_actions_json();
 }
 } // namespace anim

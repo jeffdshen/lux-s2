@@ -87,6 +87,7 @@ def single_astar(
         t, u = tu
         if u == end:
             return single_astar_path(came_from, tu)
+        # BUG should be tu?
         if u in seen:
             continue
         seen.add(u)
@@ -284,6 +285,7 @@ def goto(
         t, u = tu
         if u == end:
             return single_astar_path(came_from, tu)
+        # BUG should be tu?
         if u in seen:
             continue
         seen.add(u)
