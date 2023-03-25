@@ -16,6 +16,14 @@ if(${BUILD_DEBUG})
     add_compile_definitions(
         DEBUG_BUILD
     )
+    add_compile_options(
+        -O0
+        -g
+    )
+else()
+    add_compile_options(
+        -O3
+    )
 endif()
 
 if(${BUILD_WARNINGS})

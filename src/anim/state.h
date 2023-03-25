@@ -91,6 +91,7 @@ struct AgentState {
   Actions actions;
   DijkstraCache dcache;
   ZonesCache zcache;
+  std::vector<std::vector<Loc>> factory_spots;
 
   json get_actions_json() {
     json res = json::object();
@@ -138,14 +139,18 @@ inline void state_reset(
   state.actions = {};
 
   state.dcache = DijkstraCache{};
-  state.dcache.add_cost("LIGHT", make_cost("LIGHT", state));
-  state.dcache.add_cost("HEAVY", make_cost("HEAVY", state));
+  auto p0 = make_cost("LIGHT", state);
+  auto p1 = make_cost("HEAVY", state);
+  state.dcache.add_cost("P0", p0 + EPS);
+  state.dcache.add_cost("P1", p1 + EPS);
+  state.dcache.add_cost("T0", p0 * EPS + 1);
+  state.dcache.add_cost("T1", p1 * EPS + 1);
 
-  auto factory_spots = named_factory_spots(state.game.factories[state.player]);
+  state.factory_spots = get_factory_spots(state.game.factories[state.player]);
   state.zcache = ZonesCache{};
   state.zcache.dcache = &state.dcache;
-  state.zcache.make_zones("FACTORY_SPOT", "LIGHT", factory_spots);
-  state.zcache.make_zones("FACTORY_SPOT", "HEAVY", factory_spots);
+  state.zcache.make_zones("FACTORY_SPOT", "P0", state.factory_spots);
+  state.zcache.make_zones("FACTORY_SPOT", "P1", state.factory_spots);
 }
 
 } // namespace anim

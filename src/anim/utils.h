@@ -13,11 +13,20 @@
 namespace anim {
 const int MAX_SIZE = 64;
 const double INF = std::numeric_limits<double>::infinity();
+const double EPS = 0x1.0p-20;
 
 using Loc = std::pair<int32_t, int32_t>;
 using TimeLoc = std::pair<int32_t, Loc>;
 
 const std::vector<Loc> NEIGHBORS{{-1, 0}, {0, -1}, {0, 1}, {1, 0}};
+
+inline double zipd(double a, double b) {
+  return a + (b * EPS);
+}
+
+inline std::pair<double, double> unzipd(double x) {
+  return {std::round(x), (x - static_cast<int64_t>(std::round(x))) / EPS};
+}
 
 inline Loc add(const Loc& a, const Loc& b) {
   return {a.first + b.first, a.second + b.second};
@@ -33,6 +42,21 @@ inline Loc to_loc(const lux::Position& pos) {
 
 inline Loc add(const Loc& a, const lux::Direction& d) {
   return add(a, to_loc(lux::Position::Delta(d)));
+}
+
+const std::array<lux::Direction, 9> LOC_TO_DIR{
+    lux::Direction::CENTER,
+    lux::Direction::LEFT,
+    lux::Direction::CENTER,
+    lux::Direction::UP,
+    lux::Direction::CENTER,
+    lux::Direction::DOWN,
+    lux::Direction::CENTER,
+    lux::Direction::RIGHT,
+    lux::Direction::CENTER};
+
+inline lux::Direction to_dir(const Loc& a) {
+  return LOC_TO_DIR[3 * (a.first + 1) + (a.second + 1)];
 }
 
 struct LocHash {
@@ -242,7 +266,7 @@ struct ZonesCache {
   void make_zones(
       const std::string& zone_type,
       const std::string& cost_name,
-      const std::vector<std::pair<std::vector<Loc>, std::size_t>>& loc_groups) {
+      const std::vector<std::vector<Loc>>& loc_groups) {
     Zones zone;
     if (loc_groups.empty()) {
       zones[zone_type][cost_name] = std::move(zone);
@@ -250,9 +274,9 @@ struct ZonesCache {
     }
     std::vector<const Eigen::ArrayXXd*> dists;
     for (size_t i = 0; i < loc_groups.size(); i++) {
-      auto& [locs, name] = loc_groups[i];
+      auto& locs = loc_groups[i];
       dists.emplace_back(&dcache->backward(locs, cost_name));
-      zone.to_id.emplace_back(name);
+      zone.to_id.emplace_back(i);
       zone.to_loc.emplace_back(locs);
       for (auto& loc : locs) {
         zone.from_loc[loc] = i;
@@ -281,58 +305,17 @@ struct ZonesCache {
 const std::vector<Loc> FACTORY_SPOTS = {
     {-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
 
-inline std::vector<Loc> factory_spots(
+inline std::vector<std::vector<Loc>> get_factory_spots(
     const std::vector<lux::Factory>& factories) {
-  std::vector<Loc> spots;
-  for (auto& factory : factories) {
-    for (auto& n : FACTORY_SPOTS) {
-      spots.emplace_back(add(to_loc(factory.pos), n));
-    }
-  }
-  return spots;
-}
-
-inline std::vector<std::pair<std::vector<Loc>, size_t>> named_factory_spots(
-    const std::vector<lux::Factory>& factories) {
-  std::vector<std::pair<std::vector<Loc>, size_t>> spots;
+  std::vector<std::vector<Loc>> spots;
   for (size_t i = 0; i < factories.size(); i++) {
     auto& factory = factories[i];
     spots.emplace_back();
-    spots.back().second = i;
-    spots.back().first.reserve(FACTORY_SPOTS.size());
+    spots.back().reserve(FACTORY_SPOTS.size());
     for (auto& n : FACTORY_SPOTS) {
-      spots.back().first.emplace_back(add(to_loc(factory.pos), n));
+      spots.back().emplace_back(add(to_loc(factory.pos), n));
     }
   }
   return spots;
 }
 } // namespace anim
-
-// # only works for own units (cause recharge makes things complicated)
-// def action_queue_to_path(loc: np.ndarray, action_queue: np.ndarray):
-//     loc = np.copy(loc)
-//     path = [tuple(loc)]
-//     for action in action_queue:
-//         action = tuple(action)
-//         move = 0
-//         if action[0] == ActionType.MOVE.value:
-//             move = action[1]
-//         move_delta = MOVE_DELTAS[move]
-//         for i in range(action[5]):
-//             loc += move_delta
-//             path.append(tuple(loc))
-//     return path
-
-// def path_to_action_queue(unit: Unit, path: List[Tuple[int, int]]):
-//     deltas = [(a[0] - b[0], a[1] - b[1]) for a, b in zip(path[1:],
-//     path[:-1])] dirs = [TO_DIRECTION[delta] for delta in deltas] cmp_dirs =
-//     [] for d in dirs:
-//         if not cmp_dirs:
-//             cmp_dirs.append([d, 1])
-//             continue
-//         if cmp_dirs[-1][0] == d:
-//             cmp_dirs[-1][1] += 1
-//         else:
-//             cmp_dirs.append([d, 1])
-
-//     return [unit.move(d, n=n) for d, n in cmp_dirs]

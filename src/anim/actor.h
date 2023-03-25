@@ -6,6 +6,7 @@
 #include "anim/bid.h"
 #include "anim/lux.h"
 #include "anim/state.h"
+#include "anim/mine.h"
 
 namespace anim {
 inline json agent_setup(
@@ -35,7 +36,10 @@ inline json agent_act(
     int64_t remainingOverageTime) {
   state_reset(state, player, step, obs, remainingOverageTime);
   //   build(state);
-  //   make_mine(state);
+  make_mine(state);
+  // if (step > 10) {
+  //   throw std::runtime_error("suicide");
+  // }
   return state.get_actions_json();
 }
 } // namespace anim

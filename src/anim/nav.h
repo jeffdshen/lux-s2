@@ -44,20 +44,25 @@ struct CostTable {
 
   double get_power_cost(const UnitState& unit, const lux::UnitAction& action) {
     switch (action.type) {
-      case lux::UnitAction::Type::MOVE:
+      case lux::UnitAction::Type::MOVE: {
         auto loc = add(unit.loc, action.direction);
         return move_power[unit.unit_type](loc.first, loc.second);
-      case lux::UnitAction::Type::TRANSFER:
+      }
+      case lux::UnitAction::Type::TRANSFER: {
         return action.amount * (action.resource == lux::Resource::POWER);
-        return move_power[unit.unit_type](loc.first, loc.second);
-      case lux::UnitAction::Type::PICKUP:
+      }
+      case lux::UnitAction::Type::PICKUP: {
         return -action.amount * (action.resource == lux::Resource::POWER);
-      case lux::UnitAction::Type::DIG:
+      }
+      case lux::UnitAction::Type::DIG: {
         return unit_cfgs[unit.unit_type].DIG_COST;
-      case lux::UnitAction::Type::SELF_DESTRUCT:
+      }
+      case lux::UnitAction::Type::SELF_DESTRUCT: {
         return unit_cfgs[unit.unit_type].SELF_DESTRUCT_COST;
-      case lux::UnitAction::Type::RECHARGE:
+      }
+      case lux::UnitAction::Type::RECHARGE: {
         return 0.0;
+      }
     }
   }
 
@@ -79,21 +84,6 @@ struct CostTable {
   }
 };
 
-std::vector<double> get_power_cycle(
-    double power,
-    double power_per_day,
-    int32_t start_step,
-    int32_t max_step,
-    int32_t cycle_length,
-    int32_t day_length) {
-  std::vector<double> cycle;
-  for (int32_t step = start_step; step < max_step; step++) {
-    cycle.emplace_back(power);
-    power += power_per_day * ((step % cycle_length) < day_length);
-  }
-  return cycle;
-}
-
 using OccupiedMap = std::unordered_map<TimeLoc, UnitState, TimeLocHash>;
 using DangerMap = std::unordered_map<TimeLoc, double, TimeLocHash>;
 using TimeLocCosts = std::unordered_map<TimeLoc, double, TimeLocHash>;
@@ -104,10 +94,12 @@ struct NavState {
   int32_t day_length;
   CostTable cost_table;
   std::vector<UnitState> units;
+  std::vector<std::vector<double>> power_cycles;
+  std::vector<std::vector<double>> day_powers;
   int32_t max_turns = 100;
   int32_t search_limit = 10000;
-  OccupiedMap occupied{MAX_SIZE * MAX_SIZE * max_turns};
-  DangerMap danger{MAX_SIZE * MAX_SIZE * max_turns};
+  OccupiedMap occupied{MAX_SIZE * MAX_SIZE * 100};
+  DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
 
   static NavState from_agent_state(const AgentState& state) {
@@ -135,9 +127,27 @@ struct NavState {
           static_cast<double>(cargo.ore),
           static_cast<double>(cargo.water),
           static_cast<double>(cargo.metal),
-          static_cast<double>(my_unit.power)};
+          static_cast<double>(power)};
       nav.units.emplace_back(std::move(unit));
     }
+    for (size_t i = 0; i < MAX_UNIT_TYPE; i++) {
+      auto& unit_cfg = nav.cost_table.unit_cfgs[i];
+      std::vector<double> cycle;
+      std::vector<double> day_power;
+      double power = 0.0;
+      for (int32_t step = nav.step; step < nav.step + nav.max_turns; step++) {
+        double gain =
+            unit_cfg.CHARGE * ((step % nav.cycle_length) < nav.day_length);
+        cycle.emplace_back(power);
+        day_power.emplace_back(gain);
+        power += gain;
+      }
+      nav.power_cycles.emplace_back(std::move(cycle));
+      nav.day_powers.emplace_back(std::move(day_power));
+    }
+
+    nav.actions.resize(nav.units.size());
+    // TODO danger map
     return nav;
   }
 
@@ -150,29 +160,111 @@ struct NavState {
     // - self destruct
     // - be conservative if there are unknowns (e.g. other units, etc.)
     auto& unit = units[unit_id];
+    if (unit.step >= step + max_turns) {
+      return false;
+    }
+
+    auto next_step = unit.step + 1;
+    auto next_loc =
+        action.isMoveAction() ? add(unit.loc, action.direction) : unit.loc;
+    TimeLoc ts{next_step - step, next_loc};
+    if (occupied.contains(ts)) {
+      return false;
+    }
+
     double power_cost = cost_table.get_power_cost(unit, action);
     unit.r_at(lux::Resource::POWER) -= power_cost;
-    unit.step++;
-    if (action.isMoveAction()) {
-      unit.loc = add(unit.loc, action.direction);
-    }
+    // would need to do power check here, before power gain
+    unit.r_at(lux::Resource::POWER) +=
+        day_powers[unit.unit_type][unit.step - step];
+    unit.step = next_step;
+    unit.loc = next_loc;
     unit.r_at(action.resource) -= cost_table.get_cargo_cost(action);
-    TimeLoc ts = {unit.step - step, unit.loc};
     occupied[ts] = unit;
     actions[unit_id].emplace_back(action);
     return true;
   }
+
+  // tries to move along path, returns 0 if successful
+  // otherwise returns the error location
+  size_t apply_moves(size_t unit_id, const std::vector<Loc>& locs) {
+    for (size_t i = 1; i < locs.size(); i++) {
+      auto dir = to_dir(sub(locs[i], locs[i - 1]));
+      auto action = lux::UnitAction::Move(dir, 0, 1);
+      if (!update(unit_id, action)) {
+        return i;
+      }
+    }
+    return 0;
+  }
 };
 
-std::vector<Loc> trace_path(
+inline bool base_action_equals(
+    const lux::UnitAction& a, const lux::UnitAction& b) {
+  return a.type == b.type && a.direction == b.direction &&
+      a.resource == b.resource && a.amount == b.amount;
+}
+
+inline std::vector<lux::UnitAction> compress_actions(
+    const std::vector<lux::UnitAction>& actions) {
+  std::vector<lux::UnitAction> next_actions;
+  for (auto& action : actions) {
+    if (next_actions.empty()) {
+      next_actions.emplace_back(action);
+      continue;
+    }
+
+    auto& next_action = next_actions.back();
+    if (base_action_equals(next_action, action)) {
+      next_action.repeat += action.repeat;
+      next_action.n += action.n;
+    } else {
+      next_actions.emplace_back(action);
+      continue;
+    }
+  }
+  return next_actions;
+}
+
+inline void set_action_queue(AgentState& state, const NavState& nav) {
+  auto& state_units = state.game.units[state.player];
+  size_t queue_size = state.env_cfg.UNIT_ACTION_QUEUE_SIZE;
+  for (size_t unit_id = 0; unit_id < state_units.size(); unit_id++) {
+    auto& action_queue = state_units[unit_id].action_queue;
+    auto nav_actions = compress_actions(nav.actions[unit_id]);
+    nav_actions.resize(std::min(queue_size, nav_actions.size()));
+
+    if (action_queue.empty()) {
+      // don't need to add MOVE CENTER, since action_queue is already empty
+      if (!nav_actions.empty()) {
+        state.actions.units[unit_id] = nav_actions;
+      }
+      continue;
+    }
+
+    if (nav_actions.empty()) {
+      nav_actions.emplace_back(
+          lux::UnitAction::Move(lux::Direction::CENTER, 0, 1));
+    }
+
+    if (base_action_equals(action_queue[0], nav_actions[0])) {
+      // defer changing action queue until we need to
+      continue;
+    }
+
+    state.actions.units[unit_id] = nav_actions;
+  }
+}
+
+inline std::vector<Loc> trace_path(
     const std::unordered_map<TimeLoc, TimeLoc, TimeLocHash>& came_from,
     const TimeLoc& end) {
   std::vector<Loc> total_path{end.second};
   TimeLoc current = end;
   while (true) {
     if (auto it = came_from.find(current); it != came_from.end()) {
-      total_path.emplace_back(std::move(current.second));
       current = it->second;
+      total_path.emplace_back(current.second);
     } else {
       break;
     }
@@ -181,10 +273,11 @@ std::vector<Loc> trace_path(
   return total_path;
 }
 
-std::vector<std::pair<double, TimeLoc>> get_next_gs(
+inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
     const TimeLoc& tu,
     const TimeLocCosts& g,
     double min_power,
+    double init_power,
     const std::vector<double>& power_cycle,
     const Eigen::ArrayXXd& cost,
     const OccupiedMap& occupied,
@@ -201,17 +294,17 @@ std::vector<std::pair<double, TimeLoc>> get_next_gs(
       continue;
     }
     double next_g = g.at(tu) + cost(v.first, v.second);
-    // next_g can have a fractional part (e.g. # of steps / 2^10),
+    // next_g can have a fractional part (e.g. # of steps / 2^N),
     // so check a >= b + 1 instead of a > b
     double max_min_power = std::max(get_default(danger, tv, 0), min_power);
-    if (next_g >= power_cycle[t + 1] - max_min_power + 1) {
+    if (next_g >= init_power + power_cycle[t + 1] - max_min_power + 1) {
       continue;
     }
     neighbors.emplace_back(next_g, tv);
   }
 
   for (auto& n : {Loc{0, 0}}) {
-    auto& v = u;
+    auto v = add(u, n);
     TimeLoc tv{t + 1, v};
     // skip in_bounds check, since u should be in bounds already.
     if (occupied.contains(tv)) {
@@ -228,37 +321,9 @@ std::vector<std::pair<double, TimeLoc>> get_next_gs(
   return neighbors;
 }
 
-std::vector<Loc> go_to(
-    const NavState& state,
-    size_t unit_id,
-    const Loc& end,
-    const Eigen::ArrayXXd& cost,
-    const Eigen::ArrayXXd& h) {
-  auto& unit = state.units[unit_id];
-  auto& start = unit.loc;
-  int32_t start_step = unit.step;
-  int32_t max_step = start_step + state.max_turns;
-  double min_power = unit.unit_type * 1000;
-  double power = min_power + unit.r_at(lux::Resource::POWER);
-  auto power_cycle = get_power_cycle(
-      power,
-      state.cost_table.unit_cfgs[unit.unit_type].CHARGE,
-      start_step,
-      max_step,
-      state.cycle_length,
-      state.day_length);
-
-  auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
-    return get_next_gs(
-        tu, g, min_power, power_cycle, cost, state.occupied, state.danger);
-  };
-  return a_star(
-      start, end, state.max_turns, state.search_limit, h, next_g_func);
-}
-
 template <class G>
-std::vector<Loc> a_star(
-    const Loc& start,
+std::pair<double, std::vector<Loc>> a_star(
+    const TimeLoc& start,
     const Loc& end,
     int32_t max_turns,
     int32_t search_limit,
@@ -271,19 +336,20 @@ std::vector<Loc> a_star(
   TimeLocCosts g(MAX_SIZE * MAX_SIZE * max_turns);
   TimeLocCosts f(MAX_SIZE * MAX_SIZE * max_turns);
 
-  g[{0, start}] = 0.0;
-  f[{0, start}] = h(start.first, start.second);
+  double start_h = h(start.second.first, start.second.second);
+  g[start] = 0.0;
+  f[start] = start_h;
 
   using Score = std::pair<double, TimeLoc>;
   std::priority_queue<Score, std::vector<Score>, std::greater<Score>> q;
-  q.emplace(h(start.first, start.second), TimeLoc{0, start});
-  size_t expanded = 0;
+  q.emplace(start_h, start);
+  int32_t expanded = 0;
   while (!q.empty()) {
     auto [d, tu] = q.top();
     q.pop();
     auto& [t, u] = tu;
     if (u == end) {
-      return trace_path(came_from, tu);
+      return {g[tu], trace_path(came_from, tu)};
     }
     if (seen.contains(tu)) {
       continue;
@@ -293,7 +359,7 @@ std::vector<Loc> a_star(
       continue;
     }
     if (expanded >= search_limit) {
-      return {};
+      return {INF, {}};
     }
     expanded++;
     auto next_gs = next_g_func(tu, g);
@@ -311,7 +377,33 @@ std::vector<Loc> a_star(
       q.emplace(next_f, tv);
     }
   }
-  return {};
+  return {INF, {}};
 }
 
+inline std::pair<double, std::vector<Loc>> go_to(
+    const NavState& state,
+    size_t unit_id,
+    const Loc& end,
+    const Eigen::ArrayXXd& cost,
+    const Eigen::ArrayXXd& h) {
+  auto& unit = state.units[unit_id];
+  TimeLoc start = {unit.step - state.step, unit.loc};
+  double min_power = unit.unit_type * 1000;
+  double power = min_power + unit.r_at(lux::Resource::POWER);
+  auto& power_cycle = state.power_cycles[unit.unit_type];
+
+  auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
+    return get_next_gs(
+        tu,
+        g,
+        min_power,
+        power,
+        power_cycle,
+        cost,
+        state.occupied,
+        state.danger);
+  };
+  return a_star(
+      start, end, state.max_turns, state.search_limit, h, next_g_func);
+}
 } // namespace anim

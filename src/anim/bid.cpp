@@ -39,7 +39,7 @@ Eigen::ArrayXXd get_score(
 std::vector<std::pair<double, Loc>> make_sorted_scores(
     const AgentState& state) {
   auto& board = state.game.board;
-  auto& cost = state.dcache.costs.at("HEAVY");
+  auto& cost = state.dcache.costs.at("P1");
   auto& ice = board.ice;
   auto& ore = board.ore;
   auto& spawns = board.valid_spawns_mask;
