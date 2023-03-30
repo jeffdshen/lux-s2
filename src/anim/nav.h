@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cstdint>
 #include <string>
 
@@ -23,6 +25,12 @@ struct UnitState {
   double& r_at(const lux::Resource& r) {
     return resources[static_cast<size_t>(r)];
   };
+};
+
+struct FactoryState {
+  size_t unit_id;
+  Loc loc;
+  double power;
 };
 
 struct CostTable {
@@ -94,6 +102,7 @@ struct NavState {
   int32_t day_length;
   CostTable cost_table;
   std::vector<UnitState> units;
+  std::vector<FactoryState> factories;
   std::vector<std::vector<double>> power_cycles;
   std::vector<std::vector<double>> day_powers;
   int32_t max_turns = 100;
@@ -130,6 +139,17 @@ struct NavState {
           static_cast<double>(power)};
       nav.units.emplace_back(std::move(unit));
     }
+
+    auto& my_factories = state.game.factories[state.player];
+    nav.factories.reserve(my_factories.size());
+    for (size_t i = 0; i < my_factories.size(); i++) {
+      FactoryState factory;
+      factory.unit_id = i;
+      factory.loc = to_loc(my_factories[i].pos);
+      factory.power = state.free_factory_power[i];
+      nav.factories.emplace_back(factory);
+    }
+
     for (size_t i = 0; i < MAX_UNIT_TYPE; i++) {
       auto& unit_cfg = nav.cost_table.unit_cfgs[i];
       std::vector<double> cycle;
@@ -149,6 +169,20 @@ struct NavState {
     nav.actions.resize(nav.units.size());
     // TODO danger map
     return nav;
+  }
+
+  size_t get_factory_id(const Loc& loc) {
+    for (size_t i = 0; i < factories.size(); i++) {
+      auto& f_loc = factories[i].loc;
+      if (abs(loc.first - f_loc.first) > 1) {
+        continue;
+      }
+      if (abs(loc.second - f_loc.second) > 1) {
+        continue;
+      }
+      return i;
+    }
+    return factories.size();
   }
 
   bool update(size_t unit_id, const lux::UnitAction& action) {
@@ -172,7 +206,17 @@ struct NavState {
       return false;
     }
 
+    // TODO other factory pickups? transfers?
+    auto factory_id = get_factory_id(unit.loc);
     double power_cost = cost_table.get_power_cost(unit, action);
+    if (action.isPickupAction()) {
+      if (-power_cost + factories[factory_id].power < 0) {
+        return false;
+      }
+
+      factories[factory_id].power += power_cost;
+    }
+
     unit.r_at(lux::Resource::POWER) -= power_cost;
     // would need to do power check here, before power gain
     unit.r_at(lux::Resource::POWER) +=
@@ -188,6 +232,10 @@ struct NavState {
   // tries to move along path, returns 0 if successful
   // otherwise returns the error location
   size_t apply_moves(size_t unit_id, const std::vector<Loc>& locs) {
+    if (locs.empty()) {
+      return -1;
+    }
+
     for (size_t i = 1; i < locs.size(); i++) {
       auto dir = to_dir(sub(locs[i], locs[i - 1]));
       auto action = lux::UnitAction::Move(dir, 0, 1);
@@ -321,10 +369,10 @@ inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
   return neighbors;
 }
 
-template <class G>
+template <class E, class G>
 std::pair<double, std::vector<Loc>> a_star(
     const TimeLoc& start,
-    const Loc& end,
+    E end_func,
     int32_t max_turns,
     int32_t search_limit,
     const Eigen::ArrayXXd& h,
@@ -348,7 +396,7 @@ std::pair<double, std::vector<Loc>> a_star(
     auto [d, tu] = q.top();
     q.pop();
     auto& [t, u] = tu;
-    if (u == end) {
+    if (end_func(tu)) {
       return {g[tu], trace_path(came_from, tu)};
     }
     if (seen.contains(tu)) {
@@ -380,17 +428,23 @@ std::pair<double, std::vector<Loc>> a_star(
   return {INF, {}};
 }
 
-inline std::pair<double, std::vector<Loc>> go_to(
+inline std::pair<double, std::vector<Loc>> avoid(
     const NavState& state,
     size_t unit_id,
-    const Loc& end,
-    const Eigen::ArrayXXd& cost,
-    const Eigen::ArrayXXd& h) {
+    const int32_t turns,
+    const Eigen::ArrayXXd& cost) {
   auto& unit = state.units[unit_id];
   TimeLoc start = {unit.step - state.step, unit.loc};
   double min_power = unit.unit_type * 1000;
   double power = min_power + unit.r_at(lux::Resource::POWER);
   auto& power_cycle = state.power_cycles[unit.unit_type];
+
+  Eigen::ArrayXXd h =
+      Eigen::ArrayXXd::Constant(cost.rows(), cost.cols(), turns * EPS);
+
+  auto end_func = [&](const TimeLoc& tu) {
+    return tu.first >= (turns + unit.step - state.step);
+  };
 
   auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
     return get_next_gs(
@@ -404,6 +458,70 @@ inline std::pair<double, std::vector<Loc>> go_to(
         state.danger);
   };
   return a_star(
-      start, end, state.max_turns, state.search_limit, h, next_g_func);
+      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
+}
+
+inline std::pair<double, std::vector<Loc>> go_any(
+    const NavState& state,
+    size_t unit_id,
+    const std::vector<Loc>& ends,
+    const Eigen::ArrayXXd& cost,
+    const Eigen::ArrayXXd& h) {
+  auto& unit = state.units[unit_id];
+  TimeLoc start = {unit.step - state.step, unit.loc};
+  double min_power = unit.unit_type * 1000;
+  double power = min_power + unit.r_at(lux::Resource::POWER);
+  auto& power_cycle = state.power_cycles[unit.unit_type];
+
+  std::unordered_set<Loc, LocHash> ends_set(MAX_SIZE * MAX_SIZE);
+  for (auto& end : ends) {
+    ends_set.emplace(end);
+  }
+  auto end_func = [&](const TimeLoc& tu) {
+    return ends_set.contains(tu.second);
+  };
+
+  auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
+    return get_next_gs(
+        tu,
+        g,
+        min_power,
+        power,
+        power_cycle,
+        cost,
+        state.occupied,
+        state.danger);
+  };
+  return a_star(
+      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
+}
+
+inline std::pair<double, std::vector<Loc>> go_to(
+    const NavState& state,
+    size_t unit_id,
+    const Loc& end,
+    const Eigen::ArrayXXd& cost,
+    const Eigen::ArrayXXd& h) {
+  auto& unit = state.units[unit_id];
+  TimeLoc start = {unit.step - state.step, unit.loc};
+  double min_power = unit.unit_type * 1000;
+  double power = min_power + unit.r_at(lux::Resource::POWER);
+  auto& power_cycle = state.power_cycles[unit.unit_type];
+
+  auto end_func = [&](const TimeLoc& tu) { return tu.second == end; };
+
+  auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
+    return get_next_gs(
+        tu,
+        g,
+        min_power,
+        power,
+        power_cycle,
+        cost,
+        state.occupied,
+        state.danger);
+  };
+  return a_star(
+      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
 }
 } // namespace anim

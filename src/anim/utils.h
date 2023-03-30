@@ -28,6 +28,12 @@ inline std::pair<double, double> unzipd(double x) {
   return {std::round(x), (x - static_cast<int64_t>(std::round(x))) / EPS};
 }
 
+inline void unzipd(double x, double& a, double& b) {
+  auto [aa, bb] = unzipd(x);
+  a = aa;
+  b = bb;
+}
+
 inline Loc add(const Loc& a, const Loc& b) {
   return {a.first + b.first, a.second + b.second};
 }

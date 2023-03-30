@@ -92,6 +92,8 @@ struct AgentState {
   DijkstraCache dcache;
   ZonesCache zcache;
   std::vector<std::vector<Loc>> factory_spots;
+  std::vector<int64_t> water_costs;
+  std::vector<double> free_factory_power;
 
   json get_actions_json() {
     json res = json::object();
@@ -151,6 +153,12 @@ inline void state_reset(
   state.zcache.dcache = &state.dcache;
   state.zcache.make_zones("FACTORY_SPOT", "P0", state.factory_spots);
   state.zcache.make_zones("FACTORY_SPOT", "P1", state.factory_spots);
+
+  state.water_costs = {};
+  for (auto& factory : state.game.factories[state.player]) {
+    state.water_costs.emplace_back(factory.waterCost(obs));
+  }
+  state.free_factory_power = {};
 }
 
 } // namespace anim

@@ -4,9 +4,10 @@
 #include <string>
 
 #include "anim/bid.h"
+#include "anim/build.h"
 #include "anim/lux.h"
-#include "anim/state.h"
 #include "anim/mine.h"
+#include "anim/state.h"
 
 namespace anim {
 inline json agent_setup(
@@ -35,10 +36,10 @@ inline json agent_act(
     const lux::Observation& obs,
     int64_t remainingOverageTime) {
   state_reset(state, player, step, obs, remainingOverageTime);
-  //   build(state);
+  make_build(state);
   make_mine(state);
-  // if (step > 10) {
-  //   throw std::runtime_error("suicide");
+  // if (step > 2) {
+  //   throw std::runtime_error("resign");
   // }
   return state.get_actions_json();
 }
