@@ -72,6 +72,7 @@ struct CostTable {
         return 0.0;
       }
     }
+    return 0.0;
   }
 
   double get_cargo_cost(const lux::UnitAction& action) {
@@ -89,6 +90,7 @@ struct CostTable {
       case lux::UnitAction::Type::RECHARGE:
         return 0.0;
     }
+    return 0.0;
   }
 };
 
@@ -419,7 +421,7 @@ std::pair<double, std::vector<Loc>> a_star(
       came_from.emplace(tv, tu);
       g[tv] = next_g;
 
-      auto& [t, v] = tv;
+      auto& [_, v] = tv;
       double next_f = next_g + h(v.first, v.second);
       f[tv] = next_f;
       q.emplace(next_f, tv);

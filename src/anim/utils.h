@@ -68,7 +68,7 @@ inline lux::Direction to_dir(const Loc& a) {
 struct LocHash {
   int64_t m;
   LocHash() : LocHash(MAX_SIZE) {}
-  LocHash(int64_t m) : m(m) {}
+  LocHash(int64_t mm) : m(mm) {}
 
   size_t operator()(const Loc& x) const { return x.first * m + x.second; }
 };
@@ -76,7 +76,7 @@ struct LocHash {
 struct TimeLocHash {
   int64_t m;
   TimeLocHash() : TimeLocHash(MAX_SIZE) {}
-  TimeLocHash(int64_t m) : m(m) {}
+  TimeLocHash(int64_t mm) : m(mm) {}
 
   size_t operator()(const TimeLoc& x) const {
     return m * m * x.first + x.second.first * m + x.second.second;
