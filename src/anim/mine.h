@@ -97,7 +97,7 @@ struct MineObj {
             std::min(max_power, static_cast<double>(unit_cfg.BATTERY_CAPACITY));
 
         pickup_power = max_power - unit.r_at(lux::Resource::POWER);
-        if (pickup_power <= 0.0) {
+        if (pickup_power <= 2 * unit_cfg.ACTION_QUEUE_POWER_COST) {
           return false;
         }
         break;
