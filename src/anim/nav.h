@@ -212,6 +212,9 @@ struct NavState {
     auto factory_id = get_factory_id(unit.loc);
     double power_cost = cost_table.get_power_cost(unit, action);
     if (action.isPickupAction()) {
+      if (factory_id >= factories.size()) {
+        return false;
+      }
       if (-power_cost + factories[factory_id].power < 0) {
         return false;
       }

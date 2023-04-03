@@ -7,6 +7,7 @@ help() {
     echo "OPTIONS can be:"
     echo "  -w  --no-warnings   : disable compiler warnings (e.g. -pedantic)"
     echo "  -d  --debug         : build in debug mode (O0 and -g)"
+    echo "  -s  --sanitize      : build with sanitize modes (ASAN and UBSAN)"
     echo "  -b  --build-dir     : alternative build dir to use (default: build)"
     echo "  -h  --help          : print this help page"
 }
@@ -23,6 +24,7 @@ abort() {
 
 build_warnings="ON"
 build_debug="OFF"
+build_sanitize="OFF"
 build_config="Release"
 build_dir="build"
 
@@ -35,6 +37,10 @@ while [[ $# -gt 0 ]]; do
         -d|--debug)
             build_debug="ON"
             build_config="Debug"
+            shift
+            ;;
+        -s|--sanitize)
+            build_sanitize="ON"
             shift
             ;;
         -b|--build-dir)
@@ -53,7 +59,7 @@ json_header_path="./src/lux/nlohmann_json.hpp"
 
 mkdir -p $build_dir
 
-cmake -B $build_dir -DBUILD_WARNINGS=$build_warnings -DBUILD_DEBUG=$build_debug
+cmake -B $build_dir -DBUILD_WARNINGS=$build_warnings -DBUILD_DEBUG=$build_debug -DBUILD_SANITIZE=$build_sanitize
 
 [ $? -ne 0 ] && abort "error during cmake configuration"
 

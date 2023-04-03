@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(BINARY agent.out)
 
 option(BUILD_DEBUG "Build in debug mode" OFF)
+option(BUILD_SANITIZE "Build in sanitize mode" OFF)
 option(BUILD_WARNINGS "Build using all reasonable warnings" ON)
 
 if(${BUILD_DEBUG})
@@ -23,6 +24,19 @@ if(${BUILD_DEBUG})
 else()
     add_compile_options(
         -O3
+    )
+endif()
+
+if(${BUILD_SANITIZE})
+    add_compile_options(
+        -g
+        -fsanitize=address
+        -fsanitize=undefined
+    )
+    add_link_options(
+        -g
+        -fsanitize=address
+        -fsanitize=undefined
     )
 endif()
 
