@@ -61,7 +61,8 @@ void make_build(AgentState& state) {
 
     double metal_power = factory.cargo.metal * unit_cfgs.HEAVY.POWER_COST /
         unit_cfgs.HEAVY.METAL_COST;
-    double free_power = factory.power - metal_power;
+
+    double free_power = std::max(factory.power - metal_power, 0.0);
     state.free_factory_power.emplace_back(free_power);
   }
 }

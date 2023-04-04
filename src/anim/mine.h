@@ -208,10 +208,8 @@ struct MineObj {
       }
     }
 
-    if (pickup_power > nav.factories[factory_id].power) {
-      // LUX_INFO(
-      //     "status " << unit_id << ", " << pickup_power << ", "
-      //               << nav.factories[factory_id].power);
+    if (stage == MineStage::PICKUP &&
+        pickup_power > nav.factories[factory_id].power) {
       return ObjStatus::RETRY;
     }
 
