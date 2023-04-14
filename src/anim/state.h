@@ -94,6 +94,7 @@ struct AgentState {
   std::vector<std::vector<Loc>> factory_spots;
   std::vector<int64_t> water_costs;
   std::vector<double> free_factory_power;
+  RubbleScores rubble_scores;
 
   json get_actions_json() {
     json res = json::object();
@@ -159,6 +160,7 @@ inline void state_reset(
     state.water_costs.emplace_back(factory.waterCost(obs));
   }
   state.free_factory_power = {};
+  state.rubble_scores = {};
 }
 
 } // namespace anim

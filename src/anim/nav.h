@@ -150,6 +150,7 @@ struct NavState {
       factory.loc = to_loc(my_factories[i].pos);
       factory.power = state.free_factory_power[i];
       nav.factories.emplace_back(factory);
+      // TODO add occupied if making a unit
     }
 
     for (size_t i = 0; i < MAX_UNIT_TYPE; i++) {

@@ -324,4 +324,17 @@ inline std::vector<std::vector<Loc>> get_factory_spots(
   }
   return spots;
 }
+
+struct RubbleScores {
+  Eigen::ArrayXXd value;
+  std::vector<Loc> locs;
+
+  void make_locs_sorted() {
+    locs = argwhere(value, nonzero_f);
+    std::sort(locs.begin(), locs.end(), [&](auto& a, auto& b) {
+      return value(a.first, a.second) > value(b.first, b.second);
+    });
+  }
+};
+
 } // namespace anim
