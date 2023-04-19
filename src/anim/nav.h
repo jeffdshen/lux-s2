@@ -113,7 +113,16 @@ struct NavState {
   DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
 
-  static NavState from_agent_state(const AgentState& state) {
+  const lux::UnitConfig& get_unit_cfg(size_t unit_type) const {
+    return cost_table.unit_cfgs[unit_type];
+  }
+
+  const lux::UnitConfig& get_unit_cfg(const UnitState& unit) const {
+    return cost_table.unit_cfgs[unit.unit_type];
+  }
+
+  static NavState from_agent_state(
+      const AgentState& state, bool is_enemy = false) {
     NavState nav;
     nav.step = state.game.real_env_steps;
     nav.cycle_length = state.env_cfg.CYCLE_LENGTH;
@@ -121,7 +130,8 @@ struct NavState {
     nav.cost_table =
         CostTable::from(state.game.config.ROBOTS, state.game.board.rubble);
 
-    auto& my_units = state.game.units[state.player];
+    auto player = is_enemy ? state.opp_player : state.player;
+    auto& my_units = state.game.units[player];
     nav.units.reserve(my_units.size());
     for (size_t i = 0; i < my_units.size(); i++) {
       auto& my_unit = my_units[i];
@@ -142,15 +152,20 @@ struct NavState {
       nav.units.emplace_back(std::move(unit));
     }
 
-    auto& my_factories = state.game.factories[state.player];
+    auto& my_factories = state.game.factories[player];
     nav.factories.reserve(my_factories.size());
     for (size_t i = 0; i < my_factories.size(); i++) {
+      auto& my_factory = my_factories[i];
       FactoryState factory;
       factory.unit_id = i;
-      factory.loc = to_loc(my_factories[i].pos);
-      factory.power = state.free_factory_power[i];
+      factory.loc = to_loc(my_factory.pos);
+      factory.power = is_enemy ? static_cast<double>(my_factory.power)
+                               : state.free_factory_power[i];
       nav.factories.emplace_back(factory);
-      // TODO add occupied if making a unit
+    }
+
+    if (!is_enemy) {
+      add_build(nav, state);
     }
 
     for (size_t i = 0; i < MAX_UNIT_TYPE; i++) {
@@ -170,8 +185,69 @@ struct NavState {
     }
 
     nav.actions.resize(nav.units.size());
-    // TODO danger map
+    if (!is_enemy) {
+      add_danger(nav, state);
+    }
     return nav;
+  }
+
+  static void add_build(NavState& nav, const AgentState& state) {
+    for (auto& [i, action] : state.actions.factories) {
+      if (!action.isBuildAction()) {
+        continue;
+      }
+      UnitState unit;
+
+      unit.step = nav.step;
+      // TODO add to nav.units?
+      unit.unit_id = -1;
+      unit.unit_type =
+          (action.type == lux::FactoryAction::Type::BUILD_LIGHT) ? 0 : 1;
+      unit.loc = nav.factories[i].loc;
+
+      double power = static_cast<double>(nav.get_unit_cfg(unit).INIT_POWER);
+      unit.resources = {0.0, 0.0, 0.0, 0.0, power};
+      TimeLoc ts{1, unit.loc};
+      nav.occupied[ts] = unit;
+    }
+  }
+
+  static void add_danger(NavState& my_nav, const AgentState& state) {
+    auto nav = from_agent_state(state, true);
+    auto& enemies = state.game.units[state.opp_player];
+    for (size_t i = 0; i < enemies.size(); i++) {
+      nav.occupied.clear();
+      auto& actions = enemies[i].action_queue;
+      auto& unit = nav.units[i];
+      double min_power = unit.unit_type * 1000;
+      Loc prev_loc = unit.loc;
+      for (size_t j = 0; j < std::min<size_t>(actions.size(), 5); j++) {
+        auto& action = actions[j];
+        if (!nav.update(i, action)) {
+          break;
+        }
+
+        for (auto& n : NEIGHBORS) {
+          auto v = add(unit.loc, n);
+          double power = min_power;
+          if (prev_loc != v) {
+            power += unit.r_at(lux::Resource::POWER);
+            power -= nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
+          }
+          TimeLoc tu{unit.step - nav.step, v};
+          my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
+        }
+        {
+          double power = min_power;
+          if (prev_loc != unit.loc) {
+            power += unit.r_at(lux::Resource::POWER);
+          }
+          TimeLoc tu{unit.step - nav.step, unit.loc};
+          my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
+        }
+        prev_loc = unit.loc;
+      }
+    }
   }
 
   size_t get_factory_id(const Loc& loc) {

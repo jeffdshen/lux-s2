@@ -65,7 +65,7 @@ struct ObjEstimate {
 
   bool add_pickup(AgentState& state, const NavState& nav) {
     auto& unit = nav.units[unit_id];
-    auto& unit_cfg = nav.cost_table.unit_cfgs[unit.unit_type];
+    auto& unit_cfg = nav.get_unit_cfg(unit);
     auto& loc = unit.loc;
     auto P = get_cost_name("P", unit);
     Loc f_loc = to_loc(state.game.factories[state.player][factory_id].pos);
@@ -115,7 +115,7 @@ struct ObjEstimate {
 
   bool add_dig_turns(AgentState& state, const NavState& nav) {
     auto& unit = nav.units[unit_id];
-    auto& unit_cfg = nav.cost_table.unit_cfgs[unit.unit_type];
+    auto& unit_cfg = nav.get_unit_cfg(unit);
     auto buffer = unit_cfg.MOVE_COST * 5.0;
     auto dig_cost = unit_cfg.DIG_COST;
 
@@ -153,7 +153,7 @@ struct ObjEstimate {
 
   double get_value(AgentState&, const NavState& nav) {
     auto& unit = nav.units[unit_id];
-    auto& unit_cfg = nav.cost_table.unit_cfgs[unit.unit_type];
+    auto& unit_cfg = nav.get_unit_cfg(unit);
     auto dig_cost = unit_cfg.DIG_COST;
     double power_left = max_power - (dig_turns * dig_cost + move_power);
 
