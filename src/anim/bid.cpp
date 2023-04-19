@@ -26,12 +26,12 @@ Eigen::ArrayXXd get_factory_dist(const Eigen::ArrayXXd& dist) {
 Eigen::ArrayXXd get_score(
     const Eigen::ArrayXXd& cost,
     const Eigen::ArrayXXd& resource,
-    double eps = 1e-6) {
+    double loss = 1e-6) {
   auto locs = argwhere(resource, nonzero_f);
   Eigen::ArrayXXd score = Eigen::ArrayXXd::Zero(cost.rows(), cost.cols());
   for (auto& loc : locs) {
     auto dist = get_factory_dist(dijkstra({loc}, cost, backwards));
-    score += 1.0 / (dist.pow(2) + eps);
+    score += 1.0 / (dist + loss);
   }
   return score;
 }
@@ -44,10 +44,10 @@ std::vector<std::pair<double, Loc>> make_sorted_scores(
   auto& ore = board.ore;
   auto& spawns = board.valid_spawns_mask;
 
-  auto ice_score = get_score(cost, ice);
-  auto ore_score = get_score(cost, ore);
+  auto ice_score = get_score(cost, ice, 60.0);
+  auto ore_score = get_score(cost, ore, 60.0);
 
-  Eigen::ArrayXXd overall = ice_score * (ore_score + 0.5);
+  Eigen::ArrayXXd overall = ice_score * (ore_score + 1 / 60.0);
 
   auto locs = argwhere(spawns, nonzero_f);
   std::vector<std::pair<double, Loc>> sorted_scores;
