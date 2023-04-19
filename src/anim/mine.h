@@ -14,10 +14,11 @@
 
 namespace anim {
 const double DISCOUNT = 0.99;
+const double WATER_DISCOUNT = 0.996;
 
 enum class RubbleStage { PICKUP, MINE };
 
-enum class MineStage { PICKUP, MINE, RETURN };
+enum class MineStage { EARLY_RETURN, PICKUP, MINE, RETURN };
 
 enum class ObjStatus { INVALID, RETRY, VALID };
 
@@ -25,10 +26,13 @@ std::string get_cost_name(const std::string& s, const UnitState& unit) {
   return s + std::to_string(unit.unit_type);
 }
 
-// TODO water value for factories, also adjust values depending on
-// lichen space
 constexpr std::array<double, MAX_RESOURCE_TYPE> DEFAULT_RESOURCE_VALUE = {
-    5.0, 5.0, 5.0, 5.0, 0.0};
+    5.0, 5.0, 5.0 * 4.0, 5.0 * 5.0, 0.0};
+constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_WATER_BONUS = {
+    12.5, 0.0, 12.5 * 4.0, 0.0, 0.0};
+constexpr double POWER_PENALTY = 0.995;
+// TODO adjust based on lichen space
+// constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_SQUARE_PENALTY={};
 
 struct ObjEstimate {
   size_t unit_id;
@@ -40,6 +44,7 @@ struct ObjEstimate {
   double pickup_power = 0;
   double dig_turns = 0;
   double reward = 0;
+  double value = 0;
   std::array<double, MAX_RESOURCE_TYPE> resources = {0};
 
   void add_unzipd(double cost) {
@@ -106,10 +111,38 @@ struct ObjEstimate {
     return true;
   }
 
-  bool add_dropoff(AgentState&, const NavState&, lux::Resource resource_type) {
+  bool add_dropoff(
+      AgentState&, const NavState& nav, lux::Resource resource_type) {
     size_t i = static_cast<size_t>(resource_type);
     move_turns += 1;
-    reward += resources[i] * DEFAULT_RESOURCE_VALUE[i];
+    double r = resources[i] * DEFAULT_RESOURCE_VALUE[i];
+    {
+      double water = nav.factories[factory_id].water;
+      r = std::max(
+          r,
+          resources[i] * LOW_WATER_BONUS[i] * std::pow(WATER_DISCOUNT, water));
+    }
+    if (resource_type == lux::Resource::ORE ||
+        resource_type == lux::Resource::METAL) {
+      double power = nav.factories[factory_id].power;
+      r = r * (1 - std::pow(POWER_PENALTY, power));
+    }
+
+    reward += r;
+    return true;
+  }
+
+  bool add_early_dropoff_pickup(
+      AgentState& state, const NavState& nav, lux::Resource resource_type) {
+    if (!add_pickup(state, nav)) {
+      return false;
+    }
+    if (!add_dropoff(state, nav, resource_type)) {
+      return false;
+    }
+    double turns = move_turns + dig_turns - 1.0;
+    value += reward * std::pow(DISCOUNT, turns);
+    reward = 0.0;
     return true;
   }
 
@@ -139,13 +172,18 @@ struct ObjEstimate {
           state.rubble_scores.value(end.first, end.second);
     }
 
-    if (is_ice) {
-      size_t i = static_cast<size_t>(lux::Resource::ICE);
-      resources[i] += (dig_turns - rubble_turns) * unit_cfg.DIG_RESOURCE_GAIN;
-    }
-    if (is_ore) {
-      size_t i = static_cast<size_t>(lux::Resource::ORE);
-      resources[i] += (dig_turns - rubble_turns) * unit_cfg.DIG_RESOURCE_GAIN;
+    if (is_ice || is_ore) {
+      double max_resource = unit_cfg.CARGO_SPACE;
+      for (size_t i = 0; i < 4; i++) {
+        max_resource -= resources[i];
+      }
+      max_resource = std::max(max_resource, 0.0);
+
+      auto resource_type = is_ice ? lux::Resource::ICE : lux::Resource::ORE;
+      size_t i = static_cast<size_t>(resource_type);
+      double gain = (dig_turns - rubble_turns) * unit_cfg.DIG_RESOURCE_GAIN;
+      gain = std::min(max_resource, gain);
+      resources[i] += gain;
     }
 
     return true;
@@ -161,7 +199,7 @@ struct ObjEstimate {
     double turns = move_turns + dig_turns;
     double future_value = power_left - max_power;
     future_value += reward;
-    return future_value * std::pow(DISCOUNT, turns);
+    return future_value * std::pow(DISCOUNT, turns) + value;
   }
 
   void reset() { *this = ObjEstimate{unit_id, end}; }
@@ -187,6 +225,12 @@ struct MineObj {
       return false;
     }
     switch (stage) {
+      case MineStage::EARLY_RETURN: {
+        if (!obj.add_early_dropoff_pickup(state, nav, resource_type)) {
+          return false;
+        }
+        break;
+      }
       case MineStage::PICKUP: {
         if (!obj.add_pickup(state, nav)) {
           return false;
@@ -256,6 +300,7 @@ struct MineObj {
         }
         [[fallthrough]];
       }
+      case MineStage::EARLY_RETURN:
       case MineStage::RETURN: {
         {
           auto& factory_spots = state.factory_spots[obj.factory_id];
@@ -290,7 +335,7 @@ struct MineObj {
       }
     }
 
-    if (stage == MineStage::PICKUP &&
+    if (stage <= MineStage::PICKUP &&
         obj.pickup_power > nav.factories[obj.factory_id].power) {
       return ObjStatus::RETRY;
     }

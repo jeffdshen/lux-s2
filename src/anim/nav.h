@@ -31,6 +31,7 @@ struct FactoryState {
   size_t unit_id;
   Loc loc;
   double power;
+  double water;
 };
 
 struct CostTable {
@@ -161,6 +162,9 @@ struct NavState {
       factory.loc = to_loc(my_factory.pos);
       factory.power = is_enemy ? static_cast<double>(my_factory.power)
                                : state.free_factory_power[i];
+      factory.water = static_cast<double>(
+          my_factory.cargo.water +
+          my_factory.cargo.ice / state.env_cfg.ICE_WATER_RATIO);
       nav.factories.emplace_back(factory);
     }
 
