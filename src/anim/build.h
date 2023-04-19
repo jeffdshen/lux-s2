@@ -52,7 +52,8 @@ void make_build(AgentState& state) {
     }
 
     int64_t turns_left = state.env_cfg.max_episode_length - state.step;
-    int64_t min_water = std::min(std::max(turns_left, 50ll), 200ll);
+    int64_t min_water =
+        std::min<int64_t>(std::max<int64_t>(turns_left, 50), 200);
     if (factory.cargo.water - min_water >= 2 * state.water_costs[i]) {
       state.actions.factories[i] = lux::FactoryAction::Water();
     }
