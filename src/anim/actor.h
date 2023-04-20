@@ -35,12 +35,12 @@ inline json agent_act(
     int64_t step,
     const lux::Observation& obs,
     int64_t remainingOverageTime) {
-  state_reset(state, player, step, obs, remainingOverageTime);
-  make_build(state);
-  make_mine(state);
   // if (step > 2) {
   //   throw std::runtime_error("resign");
   // }
+  state_reset(state, player, step, obs, remainingOverageTime);
+  make_build(state);
+  make_mine(state);
   return state.get_actions_json();
 }
 } // namespace anim

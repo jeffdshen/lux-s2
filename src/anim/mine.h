@@ -273,7 +273,9 @@ struct MineObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO("err pickup: " << err);
+            LUX_INFO(
+                "err pickup: " << err << ", "
+                               << state.my_unit(unit_id).unit_id);
           }
         }
         {
@@ -288,7 +290,8 @@ struct MineObj {
         auto [_, locs] = go_to(nav, unit_id, end, cost, h);
         size_t err = nav.apply_moves(unit_id, locs);
         if (err > 0) {
-          LUX_LOG("err mine: " << err);
+          LUX_INFO(
+              "err mine: " << err << ", " << state.my_unit(unit_id).unit_id);
         }
 
         // TODO calculate real dig turns
@@ -308,7 +311,9 @@ struct MineObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO("err return: " << err);
+            LUX_INFO(
+                "err return: " << err << ", "
+                               << state.my_unit(unit_id).unit_id);
           }
         }
         {
@@ -396,7 +401,9 @@ struct RubbleObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO("err pickup: " << err);
+            LUX_INFO(
+                "err pickup: " << err << ", "
+                               << state.my_unit(unit_id).unit_id);
           }
         }
         {
@@ -411,7 +418,8 @@ struct RubbleObj {
         auto [_, locs] = go_to(nav, unit_id, end, cost, h);
         size_t err = nav.apply_moves(unit_id, locs);
         if (err > 0) {
-          LUX_LOG("err mine: " << err);
+          LUX_INFO(
+              "err mine: " << err << ", " << state.my_unit(unit_id).unit_id);
         }
 
         // TODO calculate real dig turns
@@ -462,7 +470,11 @@ struct AvoidObj {
       int32_t max_turns =
           std::min(nav.max_turns - 1, turns + unit.step - nav.step);
       auto [_, locs] = avoid(nav, unit_id, max_turns, cost);
-      nav.apply_moves(unit_id, locs);
+      size_t err = nav.apply_moves(unit_id, locs);
+      if (err > 0) {
+        LUX_INFO(
+            "err avoid: " << err << ", " << state.my_unit(unit_id).unit_id);
+      }
     }
     return true;
   }

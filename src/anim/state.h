@@ -108,6 +108,22 @@ struct AgentState {
     }
     return res;
   }
+
+  std::vector<lux::Unit>& my_units() {
+    return game.units[player];
+  }
+
+  const std::vector<lux::Unit>& my_units() const {
+    return game.units[player];
+  }
+
+  lux::Unit& my_unit(size_t i) {
+    return my_units()[i];
+  }
+
+  const lux::Unit& my_unit(size_t i) const {
+    return my_units()[i];
+  }
 };
 
 inline Eigen::ArrayXXd make_cost(

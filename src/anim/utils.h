@@ -337,4 +337,28 @@ struct RubbleScores {
   }
 };
 
+inline lux::UnitAction pop_action(std::deque<lux::UnitAction>& actions) {
+  if (actions.empty()) {
+    return lux::UnitAction::Move(lux::Direction::CENTER, 0, 1);
+  }
+
+  auto& action = actions.front();
+  auto result = action;
+  if (action.isRechargeAction()) {
+    return result;
+  }
+
+  action.n--;
+  if (action.n > 0) {
+    return result;
+  }
+
+  auto tmp = action;
+  actions.pop_front();
+  if (tmp.repeat > 0) {
+    tmp.n = tmp.repeat;
+    actions.push_back(tmp);
+  }
+  return result;
+}
 } // namespace anim

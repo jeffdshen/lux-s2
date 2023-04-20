@@ -39,7 +39,9 @@ struct CostTable {
   std::array<lux::UnitConfig, MAX_UNIT_TYPE> unit_cfgs;
 
   static CostTable from(
-      const lux::UnitConfigs& unit_cfgs, const Eigen::ArrayXXd& rubble) {
+      const lux::UnitConfigs& unit_cfgs,
+      const Eigen::ArrayXXd& rubble,
+      const std::vector<lux::Factory>& factories) {
     CostTable table;
     table.unit_cfgs[0] = unit_cfgs.LIGHT;
     table.unit_cfgs[1] = unit_cfgs.HEAVY;
@@ -47,13 +49,21 @@ struct CostTable {
       auto& unit = table.unit_cfgs[i];
       table.move_power[i] =
           (unit.MOVE_COST + rubble * unit.RUBBLE_MOVEMENT_COST).floor();
+      for (size_t j = 0; j < factories.size(); j++) {
+        auto& pos = factories[j].pos;
+        table.move_power[i].block(pos.x - 1, pos.y - 1, 3, 3) = INF;
+      }
     }
     return table;
   }
 
-  double get_power_cost(const UnitState& unit, const lux::UnitAction& action) {
+  double get_power_cost(
+      const UnitState& unit, const lux::UnitAction& action) const {
     switch (action.type) {
       case lux::UnitAction::Type::MOVE: {
+        if (action.direction == lux::Direction::CENTER) {
+          return 0.0;
+        }
         auto loc = add(unit.loc, action.direction);
         return move_power[unit.unit_type](loc.first, loc.second);
       }
@@ -76,7 +86,7 @@ struct CostTable {
     return 0.0;
   }
 
-  double get_cargo_cost(const lux::UnitAction& action) {
+  double get_cargo_cost(const lux::UnitAction& action) const {
     switch (action.type) {
       case lux::UnitAction::Type::MOVE:
         return 0.0;
@@ -128,10 +138,13 @@ struct NavState {
     nav.step = state.game.real_env_steps;
     nav.cycle_length = state.env_cfg.CYCLE_LENGTH;
     nav.day_length = state.env_cfg.DAY_LENGTH;
-    nav.cost_table =
-        CostTable::from(state.game.config.ROBOTS, state.game.board.rubble);
-
     auto player = is_enemy ? state.opp_player : state.player;
+    auto opp_player = 1 - player;
+    nav.cost_table = CostTable::from(
+        state.game.config.ROBOTS,
+        state.game.board.rubble,
+        state.game.factories[opp_player]);
+
     auto& my_units = state.game.units[player];
     nav.units.reserve(my_units.size());
     for (size_t i = 0; i < my_units.size(); i++) {
@@ -142,7 +155,10 @@ struct NavState {
       unit.unit_id = i;
       unit.unit_type = my_unit.unit_type == "LIGHT" ? 0 : 1;
       unit.loc = to_loc(my_unit.pos);
-      double power = my_unit.power - my_unit.unitConfig.ACTION_QUEUE_POWER_COST;
+      double power = my_unit.power;
+      if (!is_enemy) {
+        power -= my_unit.unitConfig.ACTION_QUEUE_POWER_COST;
+      }
       // Relys on order of types being ICE, ORE, WATER, METAL, POWER
       unit.resources = {
           static_cast<double>(cargo.ice),
@@ -221,27 +237,34 @@ struct NavState {
     auto& enemies = state.game.units[state.opp_player];
     for (size_t i = 0; i < enemies.size(); i++) {
       nav.occupied.clear();
-      auto& actions = enemies[i].action_queue;
+      std::deque<lux::UnitAction> actions{
+          enemies[i].action_queue.begin(), enemies[i].action_queue.end()};
       auto& unit = nav.units[i];
       double min_power = unit.unit_type * 1000;
       Loc prev_loc = unit.loc;
-      for (size_t j = 0; j < std::min<size_t>(actions.size(), 5); j++) {
-        auto& action = actions[j];
-        if (!nav.update(i, action)) {
-          break;
-        }
 
+      for (size_t j = 0; j < 5; j++) {
         for (auto& n : NEIGHBORS) {
+          auto action = lux::UnitAction::Move(to_dir(n), 0, 1);
+          if (!nav.check_update(i, action)) {
+            continue;
+          }
           auto v = add(unit.loc, n);
           double power = min_power;
-          if (prev_loc != v) {
-            power += unit.r_at(lux::Resource::POWER);
-            power -= nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
-          }
+          power += nav.get_power(unit, action) -
+              nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
           TimeLoc tu{unit.step - nav.step, v};
           my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
         }
         {
+          auto action = pop_action(actions);
+          if (!nav.update(i, action)) {
+            actions.clear();
+            action = pop_action(actions);
+            if (!nav.update(i, action)) {
+              break;
+            }
+          }
           double power = min_power;
           if (prev_loc != unit.loc) {
             power += unit.r_at(lux::Resource::POWER);
@@ -254,7 +277,7 @@ struct NavState {
     }
   }
 
-  size_t get_factory_id(const Loc& loc) {
+  size_t get_factory_id(const Loc& loc) const {
     for (size_t i = 0; i < factories.size(); i++) {
       auto& f_loc = factories[i].loc;
       if (abs(loc.first - f_loc.first) > 1) {
@@ -268,14 +291,7 @@ struct NavState {
     return factories.size();
   }
 
-  bool update(size_t unit_id, const lux::UnitAction& action) {
-    // TODO this should do as much can be simulated (one-sided), e.g.:
-    // - range/bounds checking (return false if bad)
-    // - other unit should get bonus for transfer
-    // - subtract from factory for pickup
-    // - dig should increase resource, update rubble
-    // - self destruct
-    // - be conservative if there are unknowns (e.g. other units, etc.)
+  bool check_update(size_t unit_id, const lux::UnitAction& action) const {
     auto& unit = units[unit_id];
     if (unit.step >= step + max_turns) {
       return false;
@@ -289,27 +305,60 @@ struct NavState {
       return false;
     }
 
-    // TODO other factory pickups? transfers?
-    auto factory_id = get_factory_id(unit.loc);
+    if (!in_bounds(next_loc, shape(cost_table.move_power[unit.unit_type]))) {
+      return false;
+    }
     double power_cost = cost_table.get_power_cost(unit, action);
+
     if (action.isPickupAction()) {
+      auto factory_id = get_factory_id(unit.loc);
       if (factory_id >= factories.size()) {
         return false;
       }
       if (-power_cost + factories[factory_id].power < 0) {
         return false;
       }
+    }
 
+    if (unit.r_at(lux::Resource::POWER) < power_cost) {
+      return false;
+    }
+
+    return true;
+  }
+
+  double get_power(const UnitState& unit, const lux::UnitAction& action) const {
+    double power_cost = cost_table.get_power_cost(unit, action);
+    return unit.r_at(lux::Resource::POWER) - power_cost +
+        day_powers[unit.unit_type][unit.step - step];
+  }
+
+  bool update(size_t unit_id, const lux::UnitAction& action) {
+    // TODO this should do as much can be simulated (one-sided), e.g.:
+    // - range/bounds checking (return false if bad)
+    // - other unit should get bonus for transfer
+    // - subtract from factory for pickup
+    // - dig should increase resource, update rubble
+    // - self destruct
+    // - be conservative if there are unknowns (e.g. other units, etc.)
+    if (!check_update(unit_id, action)) {
+      return false;
+    }
+    auto& unit = units[unit_id];
+
+    // TODO other factory pickups? transfers?
+    double power_cost = cost_table.get_power_cost(unit, action);
+    if (action.isPickupAction()) {
+      auto factory_id = get_factory_id(unit.loc);
       factories[factory_id].power += power_cost;
     }
 
-    unit.r_at(lux::Resource::POWER) -= power_cost;
-    // would need to do power check here, before power gain
-    unit.r_at(lux::Resource::POWER) +=
-        day_powers[unit.unit_type][unit.step - step];
-    unit.step = next_step;
-    unit.loc = next_loc;
+    unit.r_at(lux::Resource::POWER) = get_power(unit, action);
+    unit.step = unit.step + 1;
+    unit.loc =
+        action.isMoveAction() ? add(unit.loc, action.direction) : unit.loc;
     unit.r_at(action.resource) -= cost_table.get_cargo_cost(action);
+    TimeLoc ts{unit.step - step, unit.loc};
     occupied[ts] = unit;
     actions[unit_id].emplace_back(action);
     return true;
@@ -326,6 +375,7 @@ struct NavState {
       auto dir = to_dir(sub(locs[i], locs[i - 1]));
       auto action = lux::UnitAction::Move(dir, 0, 1);
       if (!update(unit_id, action)) {
+        LUX_INFO("err: " << static_cast<json>(action).dump());
         return i;
       }
     }
@@ -444,12 +494,12 @@ inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
     if (occupied.contains(tv)) {
       continue;
     }
-    double next_g = g.at(tu);
-    // moving robots always win
-    if (danger.contains(tv)) {
+    // check danger only as if we were min_power
+    if (min_power < get_default(danger, tv, 0)) {
       continue;
     }
     // no need for power check, since we are not moving
+    double next_g = g.at(tu);
     neighbors.emplace_back(next_g, tv);
   }
   return neighbors;
@@ -528,9 +578,7 @@ inline std::pair<double, std::vector<Loc>> avoid(
   Eigen::ArrayXXd h =
       Eigen::ArrayXXd::Constant(cost.rows(), cost.cols(), turns * EPS);
 
-  auto end_func = [&](const TimeLoc& tu) {
-    return tu.first >= (turns + unit.step - state.step);
-  };
+  auto end_func = [&](const TimeLoc& tu) { return tu.first >= turns; };
 
   auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
     return get_next_gs(

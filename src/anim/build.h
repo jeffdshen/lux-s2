@@ -29,7 +29,7 @@ bool can_build(
 
 void make_build(AgentState& state) {
   auto& factories = state.game.factories[state.player];
-  auto& units = state.game.units[state.player];
+  auto& units = state.my_units();
 
   std::unordered_map<std::string, size_t> unit_counts;
   for (auto& unit : units) {
