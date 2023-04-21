@@ -30,24 +30,38 @@ Eigen::ArrayXXd get_score(
   auto locs = argwhere(resource, nonzero_f);
   Eigen::ArrayXXd score = Eigen::ArrayXXd::Zero(cost.rows(), cost.cols());
   for (auto& loc : locs) {
-    auto dist = get_factory_dist(dijkstra({loc}, cost, backwards));
-    score += 1.0 / (dist + loss);
+    auto power = get_factory_dist(dijkstra({loc}, cost, backwards));
+    score += 1.0 / (power + loss);
   }
   return score;
+}
+
+Eigen::ArrayXXd get_cost(const AgentState& state) {
+  auto& board = state.game.board;
+  Eigen::ArrayXXd rubble = board.rubble * (1 - board.ice) * (1 - board.ore);
+  auto& unit_cfg = state.env_cfg.ROBOTS.HEAVY;
+  Eigen::ArrayXXd cost =
+      (unit_cfg.MOVE_COST + rubble * unit_cfg.RUBBLE_MOVEMENT_COST).floor();
+  auto& enemy_factories = state.game.factories.at(state.opp_player);
+  for (auto& factory : enemy_factories) {
+    auto& pos = factory.pos;
+    cost.block(pos.x - 1, pos.y - 1, 3, 3) = INF;
+  }
+  return cost;
 }
 
 std::vector<std::pair<double, Loc>> make_sorted_scores(
     const AgentState& state) {
   auto& board = state.game.board;
-  auto& cost = state.dcache.costs.at("P1");
+  auto cost = get_cost(state);
   auto& ice = board.ice;
   auto& ore = board.ore;
   auto& spawns = board.valid_spawns_mask;
 
-  auto ice_score = get_score(cost, ice, 60.0);
-  auto ore_score = get_score(cost, ore, 60.0);
+  auto ice_score = get_score(cost, ice);
+  auto ore_score = get_score(cost, ore);
 
-  Eigen::ArrayXXd overall = ice_score * (ore_score + 1 / 60.0);
+  Eigen::ArrayXXd overall = ice_score * (ore_score + 1 / 40.0);
 
   auto locs = argwhere(spawns, nonzero_f);
   std::vector<std::pair<double, Loc>> sorted_scores;

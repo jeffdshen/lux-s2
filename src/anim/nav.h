@@ -123,6 +123,7 @@ struct NavState {
   OccupiedMap occupied{MAX_SIZE * MAX_SIZE * 100};
   DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
+  bool is_enemy = false;
 
   const lux::UnitConfig& get_unit_cfg(size_t unit_type) const {
     return cost_table.unit_cfgs[unit_type];
@@ -135,6 +136,7 @@ struct NavState {
   static NavState from_agent_state(
       const AgentState& state, bool is_enemy = false) {
     NavState nav;
+    nav.is_enemy = is_enemy;
     nav.step = state.game.real_env_steps;
     nav.cycle_length = state.env_cfg.CYCLE_LENGTH;
     nav.day_length = state.env_cfg.DAY_LENGTH;
@@ -463,6 +465,7 @@ inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
     double min_power,
     double init_power,
     const std::vector<double>& power_cycle,
+    int32_t start_time,
     const Eigen::ArrayXXd& cost,
     const OccupiedMap& occupied,
     const DangerMap& danger) {
@@ -481,7 +484,8 @@ inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
     // next_g can have a fractional part (e.g. # of steps / 2^N),
     // so check a >= b + 1 instead of a > b
     double max_min_power = std::max(get_default(danger, tv, 0), min_power);
-    if (next_g >= init_power + power_cycle[t + 1] - max_min_power + 1) {
+    if (next_g >= init_power + power_cycle[t] - power_cycle[start_time] -
+            max_min_power + 1) {
       continue;
     }
     neighbors.emplace_back(next_g, tv);
@@ -587,6 +591,7 @@ inline std::pair<double, std::vector<Loc>> avoid(
         min_power,
         power,
         power_cycle,
+        start.first,
         cost,
         state.occupied,
         state.danger);
@@ -622,6 +627,7 @@ inline std::pair<double, std::vector<Loc>> go_any(
         min_power,
         power,
         power_cycle,
+        start.first,
         cost,
         state.occupied,
         state.danger);
@@ -651,6 +657,7 @@ inline std::pair<double, std::vector<Loc>> go_to(
         min_power,
         power,
         power_cycle,
+        start.first,
         cost,
         state.occupied,
         state.danger);

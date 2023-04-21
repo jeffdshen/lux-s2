@@ -34,6 +34,15 @@ inline void unzipd(double x, double& a, double& b) {
   b = bb;
 }
 
+inline std::pair<Eigen::ArrayXXd, Eigen::ArrayXXd> unzipd(
+    const Eigen::ArrayXXd& x) {
+  // ieee754 std::round(INF) is well defined
+  Eigen::ArrayXXd a = x.round();
+  // ieee754 handle INF so we get INF - MAX = INF
+  Eigen::ArrayXXd b = (x - a.min(std::numeric_limits<double>::max())) / EPS;
+  return {std::move(a), std::move(b)};
+}
+
 inline Loc add(const Loc& a, const Loc& b) {
   return {a.first + b.first, a.second + b.second};
 }

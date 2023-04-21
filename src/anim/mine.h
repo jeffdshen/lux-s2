@@ -78,6 +78,9 @@ struct ObjEstimate {
     double cost = 0.0;
     auto& factory_spots = state.factory_spots[factory_id];
     cost += state.dcache.backward(factory_spots, P)(loc.first, loc.second);
+    if (unzipd(cost).first > max_power) {
+      return false;
+    }
     cost += state.dcache.backward(end, P)(f_loc.first, f_loc.second);
 
     max_power += nav.factories[factory_id].power;
