@@ -27,7 +27,7 @@ std::string get_cost_name(const std::string& s, const UnitState& unit) {
 }
 
 constexpr std::array<double, MAX_RESOURCE_TYPE> DEFAULT_RESOURCE_VALUE = {
-    5.0, 5.0, 5.0 * 4.0, 5.0 * 5.0, 0.0};
+    12.0, 10, 5.0 * 4.0, 10 * 5.0, 0.0};
 constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_WATER_BONUS = {
     12.5, 0.0, 12.5 * 4.0, 0.0, 0.0};
 constexpr double POWER_PENALTY = 0.995;
@@ -88,7 +88,7 @@ struct ObjEstimate {
         std::min(max_power, static_cast<double>(unit_cfg.BATTERY_CAPACITY));
 
     pickup_power = max_power - unit.r_at(lux::Resource::POWER);
-    if (pickup_power <= 2 * unit_cfg.ACTION_QUEUE_POWER_COST) {
+    if (pickup_power <= 10 * unit_cfg.ACTION_QUEUE_POWER_COST) {
       return false;
     }
     add_unzipd(cost);

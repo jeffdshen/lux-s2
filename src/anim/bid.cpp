@@ -28,12 +28,15 @@ Eigen::ArrayXXd get_score(
     const Eigen::ArrayXXd& resource,
     double loss = 1e-6) {
   auto locs = argwhere(resource, nonzero_f);
-  Eigen::ArrayXXd score = Eigen::ArrayXXd::Zero(cost.rows(), cost.cols());
+  Eigen::ArrayXXd sum_score = Eigen::ArrayXXd::Zero(cost.rows(), cost.cols());
+  Eigen::ArrayXXd max_score = Eigen::ArrayXXd::Zero(cost.rows(), cost.cols());
   for (auto& loc : locs) {
     auto power = get_factory_dist(dijkstra({loc}, cost, backwards));
-    score += 1.0 / (power + loss);
+    Eigen::ArrayXXd score = 1.0 / (power + loss);
+    sum_score += score;
+    max_score = max_score.max(score);
   }
-  return score;
+  return (sum_score / locs.size() + max_score) / 2.0;
 }
 
 Eigen::ArrayXXd get_cost(const AgentState& state) {
@@ -61,7 +64,7 @@ std::vector<std::pair<double, Loc>> make_sorted_scores(
   auto ice_score = get_score(cost, ice);
   auto ore_score = get_score(cost, ore);
 
-  Eigen::ArrayXXd overall = ice_score * (ore_score + 1 / 40.0);
+  Eigen::ArrayXXd overall = ice_score * (ore_score + 1 / 80.0);
 
   auto locs = argwhere(spawns, nonzero_f);
   std::vector<std::pair<double, Loc>> sorted_scores;
