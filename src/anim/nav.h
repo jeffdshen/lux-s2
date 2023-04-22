@@ -123,6 +123,7 @@ struct NavState {
   OccupiedMap occupied{MAX_SIZE * MAX_SIZE * 100};
   DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
+  std::vector<std::vector<UnitState>> history;
   bool is_enemy = false;
 
   const lux::UnitConfig& get_unit_cfg(size_t unit_type) const {
@@ -207,6 +208,10 @@ struct NavState {
     }
 
     nav.actions.resize(nav.units.size());
+    nav.history.resize(nav.units.size());
+    for (size_t i = 0; i < nav.units.size(); i++) {
+      nav.history[i].emplace_back(nav.units[i]);
+    }
     if (!is_enemy) {
       add_danger(nav, state);
     }
@@ -253,24 +258,23 @@ struct NavState {
           }
           auto v = add(unit.loc, n);
           double power = min_power;
-          power += nav.get_power(unit, action) -
-              nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
-          TimeLoc tu{unit.step - nav.step, v};
+          power += nav.get_collision_power(unit, action);
+          power -= nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
+          TimeLoc tu{unit.step + 1 - nav.step, v};
           my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
         }
         {
           auto action = pop_action(actions);
-          if (!nav.update(i, action)) {
+          if (!nav.check_update(i, action)) {
             actions.clear();
             action = pop_action(actions);
-            if (!nav.update(i, action)) {
+            if (!nav.check_update(i, action)) {
               break;
             }
           }
           double power = min_power;
-          if (prev_loc != unit.loc) {
-            power += unit.r_at(lux::Resource::POWER);
-          }
+          power += nav.get_collision_power(unit, action);
+          nav.update(i, action);
           TimeLoc tu{unit.step - nav.step, unit.loc};
           my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
         }
@@ -293,7 +297,10 @@ struct NavState {
     return factories.size();
   }
 
-  bool check_update(size_t unit_id, const lux::UnitAction& action) const {
+  bool check_update(
+      size_t unit_id,
+      const lux::UnitAction& action,
+      bool check_danger = true) const {
     auto& unit = units[unit_id];
     if (unit.step >= step + max_turns) {
       return false;
@@ -326,7 +333,23 @@ struct NavState {
       return false;
     }
 
+    if (check_danger) {
+      double power = unit.unit_type * 1000;
+      power += get_collision_power(unit, action);
+      if (get_default(danger, ts, 0) > power) {
+        return false;
+      }
+    }
     return true;
+  }
+
+  double get_collision_power(
+      const UnitState& unit, const lux::UnitAction& action) const {
+    double power_cost = cost_table.get_power_cost(unit, action);
+    if (!action.isMoveAction() || action.direction == lux::Direction::CENTER) {
+      return 0.0;
+    }
+    return unit.r_at(lux::Resource::POWER) - power_cost;
   }
 
   double get_power(const UnitState& unit, const lux::UnitAction& action) const {
@@ -335,15 +358,14 @@ struct NavState {
         day_powers[unit.unit_type][unit.step - step];
   }
 
-  bool update(size_t unit_id, const lux::UnitAction& action) {
+  bool update(
+      size_t unit_id, const lux::UnitAction& action, bool check_danger = true) {
     // TODO this should do as much can be simulated (one-sided), e.g.:
-    // - range/bounds checking (return false if bad)
     // - other unit should get bonus for transfer
-    // - subtract from factory for pickup
     // - dig should increase resource, update rubble
     // - self destruct
     // - be conservative if there are unknowns (e.g. other units, etc.)
-    if (!check_update(unit_id, action)) {
+    if (!check_update(unit_id, action, check_danger)) {
       return false;
     }
     auto& unit = units[unit_id];
@@ -363,7 +385,32 @@ struct NavState {
     TimeLoc ts{unit.step - step, unit.loc};
     occupied[ts] = unit;
     actions[unit_id].emplace_back(action);
+    history[unit_id].emplace_back(unit);
     return true;
+  }
+
+  void revert(size_t unit_id, int32_t time) {
+    auto& hist = history[unit_id];
+    auto& acts = actions[unit_id];
+    for (int32_t t = hist.size() - 1; t > time; t--) {
+      auto& action = acts.back();
+      if (action.isPickupAction()) {
+        auto& unit = hist[t - 1];
+        double power_cost = cost_table.get_power_cost(unit, action);
+        auto factory_id = get_factory_id(unit.loc);
+        factories[factory_id].power -= power_cost;
+      }
+
+      {
+        auto& unit = hist[t];
+        TimeLoc ts{unit.step - step, unit.loc};
+        occupied.erase(ts);
+      }
+
+      units[unit_id] = hist[t - 1];
+      acts.pop_back();
+      hist.pop_back();
+    }
   }
 
   // tries to move along path, returns 0 if successful
@@ -379,6 +426,15 @@ struct NavState {
       if (!update(unit_id, action)) {
         LUX_INFO("err: " << static_cast<json>(action).dump());
         return i;
+      }
+    }
+    return 0;
+  }
+
+  size_t repeat(size_t unit_id, lux::UnitAction& action, size_t turns) {
+    for (size_t i = 0; i < turns; i++) {
+      if (!update(unit_id, action)) {
+        return turns - i;
       }
     }
     return 0;
@@ -547,6 +603,7 @@ std::pair<double, std::vector<Loc>> a_star(
       continue;
     }
     if (expanded >= search_limit) {
+      LUX_INFO("search limit");
       return {INF, {}};
     }
     expanded++;

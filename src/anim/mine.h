@@ -277,31 +277,42 @@ struct MineObj {
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
-                "err pickup: " << err << ", "
-                               << state.my_unit(unit_id).unit_id);
+                "rev pick: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
           }
         }
         {
           auto action = lux::UnitAction::Pickup(
               lux::Resource::POWER, obj.pickup_power, 0, 1);
-          nav.update(unit_id, action);
+          if (!nav.update(unit_id, action)) {
+            LUX_INFO("rev pick: " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
+          }
         }
         [[fallthrough]];
       }
       case MineStage::MINE: {
-        auto& h = state.dcache.backward(end, P);
-        auto [_, locs] = go_to(nav, unit_id, end, cost, h);
-        size_t err = nav.apply_moves(unit_id, locs);
-        if (err > 0) {
-          LUX_INFO(
-              "err mine: " << err << ", " << state.my_unit(unit_id).unit_id);
+        {
+          auto& h = state.dcache.backward(end, P);
+          auto [_, locs] = go_to(nav, unit_id, end, cost, h);
+          size_t err = nav.apply_moves(unit_id, locs);
+          if (err > 0) {
+            LUX_INFO(
+                "rev mine: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
+          }
         }
-
-        // TODO calculate real dig turns
-        for (size_t i = 0; i < obj.dig_turns; i++) {
+        {
           auto action = lux::UnitAction::Dig(0, 1);
-          if (!nav.update(unit_id, action)) {
-            break;
+          size_t err = nav.repeat(unit_id, action, obj.dig_turns);
+          if (err > 3) {
+            LUX_INFO(
+                "rev dig: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
           }
         }
         [[fallthrough]];
@@ -315,15 +326,21 @@ struct MineObj {
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
-                "err return: " << err << ", "
+                "rev return: " << err << ", "
                                << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
           }
         }
         {
           double resources = obj.resources[static_cast<size_t>(resource_type)];
           auto action = lux::UnitAction::Transfer(
               lux::Direction::CENTER, resource_type, resources, 0, 1);
-          nav.update(unit_id, action);
+          if (!nav.update(unit_id, action)) {
+            LUX_INFO("rev tx: " << resources << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
+          }
         }
       }
     }
@@ -405,31 +422,42 @@ struct RubbleObj {
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
-                "err pickup: " << err << ", "
-                               << state.my_unit(unit_id).unit_id);
+                "rev pick: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
           }
         }
         {
           auto action = lux::UnitAction::Pickup(
               lux::Resource::POWER, obj.pickup_power, 0, 1);
-          nav.update(unit_id, action);
+          if (!nav.update(unit_id, action)) {
+            LUX_INFO("rev pick: " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
+          }
         }
         [[fallthrough]];
       }
       case RubbleStage::MINE: {
-        auto& h = state.dcache.backward(end, P);
-        auto [_, locs] = go_to(nav, unit_id, end, cost, h);
-        size_t err = nav.apply_moves(unit_id, locs);
-        if (err > 0) {
-          LUX_INFO(
-              "err mine: " << err << ", " << state.my_unit(unit_id).unit_id);
+        {
+          auto& h = state.dcache.backward(end, P);
+          auto [_, locs] = go_to(nav, unit_id, end, cost, h);
+          size_t err = nav.apply_moves(unit_id, locs);
+          if (err > 0) {
+            LUX_INFO(
+                "rev mine: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
+          }
         }
-
-        // TODO calculate real dig turns
-        for (size_t i = 0; i < obj.dig_turns; i++) {
+        {
           auto action = lux::UnitAction::Dig(0, 1);
-          if (!nav.update(unit_id, action)) {
-            break;
+          size_t err = nav.repeat(unit_id, action, obj.dig_turns);
+          if (err > 3) {
+            LUX_INFO(
+                "rev dig: " << err << ", " << state.my_unit(unit_id).unit_id);
+            nav.revert(unit_id, step - nav.step);
+            return false;
           }
         }
       }
