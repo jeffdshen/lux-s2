@@ -193,7 +193,7 @@ struct ObjEstimate {
         std::min(rubble, rubble_turns * unit_cfg.DIG_RUBBLE_REMOVED);
     if (rubble > 0.0) {
       reward += rubble_cleared / rubble *
-          state.rubble_scores.value(end.first, end.second);
+          state.rubble_scores.reward(end.first, end.second);
     }
 
     if (is_ice || is_ore) {

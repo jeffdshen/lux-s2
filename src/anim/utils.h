@@ -367,6 +367,7 @@ inline std::vector<std::vector<Loc>> get_factory_adjacent(
 }
 
 struct RubbleScores {
+  Eigen::ArrayXXd reward;
   Eigen::ArrayXXd value;
   std::vector<Loc> locs;
 

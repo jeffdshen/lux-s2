@@ -44,8 +44,12 @@ inline Eigen::ArrayXXd get_lichen_scores(AgentState& state) {
 }
 
 inline void add_rubble_scores(AgentState& state) {
-  state.rubble_scores =
-      RubbleScores{get_lichen_scores(state), std::vector<Loc>{}};
+  auto& rubble = state.game.board.rubble;
+  auto zeros = Eigen::ArrayXXd::Zero(rubble.rows(), rubble.cols());
+  state.rubble_scores = RubbleScores{zeros, zeros, std::vector<Loc>{}};
+  state.rubble_scores.reward += get_lichen_scores(state);
+  state.rubble_scores.value = state.rubble_scores.reward;
+  state.rubble_scores.value -= rubble / 2.0 * 5.0;
   state.rubble_scores.make_locs_sorted();
 }
 
