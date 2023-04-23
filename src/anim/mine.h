@@ -337,7 +337,9 @@ struct MineObj {
           auto action = lux::UnitAction::Transfer(
               lux::Direction::CENTER, resource_type, resources, 0, 1);
           if (!nav.update(unit_id, action)) {
-            LUX_INFO("rev tx: " << resources << ", " << state.my_unit(unit_id).unit_id);
+            LUX_INFO(
+                "rev tx: " << resources << ", "
+                           << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -613,39 +615,47 @@ inline void add_rubble_objs(
 inline void make_mine(AgentState& state) {
   ObjMatch match;
   auto nav = NavState::from_agent_state(state);
-  add_rubble_scores(state);
-  add_mine_objs(match, state, nav);
-  add_rubble_objs(match, state, nav);
+
+  {
+    add_rubble_scores(state);
+    add_mine_objs(match, state, nav);
+    add_rubble_objs(match, state, nav);
+  }
   auto factories = state.game.factories[state.player];
 
   std::unordered_map<Loc, size_t, LocHash> loc_count{MAX_SIZE * MAX_SIZE};
-  while (!match.q.empty()) {
-    auto [value, obj_id] = match.q.top();
-    match.q.pop();
-    auto& item = match.items[obj_id];
-    ObjStatus status =
-        std::visit([&](auto&& x) { return x.get_status(state, nav); }, item);
-    if (status == ObjStatus::INVALID) {
-      continue;
+
+  {
+    while (!match.q.empty()) {
+      auto [value, obj_id] = match.q.top();
+      match.q.pop();
+      auto& item = match.items[obj_id];
+      ObjStatus status =
+          std::visit([&](auto&& x) { return x.get_status(state, nav); }, item);
+      if (status == ObjStatus::INVALID) {
+        continue;
+      }
+      if (status == ObjStatus::RETRY) {
+        std::visit(
+            [&, obj_id = obj_id](auto&& x) {
+              bool success = x.estimate(state, nav);
+              if (success) {
+                match.q.push({x.value, obj_id});
+              }
+            },
+            item);
+        continue;
+      }
+      std::visit([&](auto&& x) { return x.execute(state, nav); }, item);
     }
-    if (status == ObjStatus::RETRY) {
-      std::visit(
-          [&, obj_id = obj_id](auto&& x) {
-            bool success = x.estimate(state, nav);
-            if (success) {
-              match.q.push({x.value, obj_id});
-            }
-          },
-          item);
-      continue;
-    }
-    std::visit([&](auto&& x) { return x.execute(state, nav); }, item);
   }
 
-  auto& units = nav.units;
-  for (auto& unit : units) {
-    AvoidObj o{unit.unit_id, unit.step, nav.max_turns};
-    o.execute(state, nav);
+  {
+    auto& units = nav.units;
+    for (auto& unit : units) {
+      AvoidObj o{unit.unit_id, unit.step, 10};
+      o.execute(state, nav);
+    }
   }
   set_action_queue(state, nav);
 }

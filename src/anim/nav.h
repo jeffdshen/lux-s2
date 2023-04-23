@@ -119,7 +119,7 @@ struct NavState {
   std::vector<std::vector<double>> power_cycles;
   std::vector<std::vector<double>> day_powers;
   int32_t max_turns = 100;
-  int32_t search_limit = 10000;
+  int32_t search_limit = 2000;
   OccupiedMap occupied{MAX_SIZE * MAX_SIZE * 100};
   DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
