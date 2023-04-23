@@ -92,6 +92,7 @@ struct AgentState {
   DijkstraCache dcache;
   ZonesCache zcache;
   std::vector<std::vector<Loc>> factory_spots;
+  std::vector<std::vector<Loc>> enemy_adj;
   std::vector<int64_t> water_costs;
   std::vector<double> free_factory_power;
   RubbleScores rubble_scores;
@@ -109,21 +110,13 @@ struct AgentState {
     return res;
   }
 
-  std::vector<lux::Unit>& my_units() {
-    return game.units[player];
-  }
+  std::vector<lux::Unit>& my_units() { return game.units[player]; }
 
-  const std::vector<lux::Unit>& my_units() const {
-    return game.units[player];
-  }
+  const std::vector<lux::Unit>& my_units() const { return game.units[player]; }
 
-  lux::Unit& my_unit(size_t i) {
-    return my_units()[i];
-  }
+  lux::Unit& my_unit(size_t i) { return my_units()[i]; }
 
-  const lux::Unit& my_unit(size_t i) const {
-    return my_units()[i];
-  }
+  const lux::Unit& my_unit(size_t i) const { return my_units()[i]; }
 };
 
 inline Eigen::ArrayXXd make_cost(
@@ -166,10 +159,14 @@ inline void state_reset(
   state.dcache.add_cost("T1", p1 * EPS + 1);
 
   state.factory_spots = get_factory_spots(state.game.factories[state.player]);
+  state.enemy_adj = get_factory_adjacent(
+      state.game.factories[state.opp_player], shape(state.game.board.ice));
   state.zcache = ZonesCache{};
   state.zcache.dcache = &state.dcache;
   state.zcache.make_zones("FACTORY_SPOT", "P0", state.factory_spots);
   state.zcache.make_zones("FACTORY_SPOT", "P1", state.factory_spots);
+  state.zcache.make_zones("ENEMY_ADJ", "P0", state.enemy_adj);
+  state.zcache.make_zones("ENEMY_ADJ", "P1", state.enemy_adj);
 
   state.water_costs = {};
   for (auto& factory : state.game.factories[state.player]) {

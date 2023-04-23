@@ -37,6 +37,7 @@ constexpr double POWER_PENALTY = 0.995;
 struct ObjEstimate {
   size_t unit_id;
   Loc end;
+  std::vector<Loc> ends{};
   size_t factory_id = 0;
   double move_power = 0;
   double move_turns = 0;
@@ -60,11 +61,27 @@ struct ObjEstimate {
     return true;
   }
 
-  bool set_factory_id(AgentState& state, const NavState& nav) {
+  bool set_factory_id(
+      AgentState& state, const NavState& nav, bool self = false) {
     auto& unit = nav.units[unit_id];
     auto P = get_cost_name("P", unit);
     auto& zone = state.zcache.get_zone("FACTORY_SPOT", P);
-    factory_id = static_cast<size_t>(zone.zone(end.first, end.second));
+    if (self) {
+      auto& loc = unit.loc;
+      factory_id = static_cast<size_t>(zone.zone(loc.first, loc.second));
+    } else {
+      factory_id = static_cast<size_t>(zone.zone(end.first, end.second));
+    }
+    return true;
+  }
+
+  bool set_enemy_ends(AgentState& state, const NavState& nav) {
+    auto& unit = nav.units[unit_id];
+    auto P = get_cost_name("P", unit);
+    auto& zone = state.zcache.get_zone("ENEMY_ADJ", P);
+    size_t enemy_factory_id =
+        static_cast<size_t>(zone.zone(end.first, end.second));
+    ends = state.enemy_adj[enemy_factory_id];
     return true;
   }
 
@@ -81,7 +98,11 @@ struct ObjEstimate {
     if (unzipd(cost).first > max_power) {
       return false;
     }
-    cost += state.dcache.backward(end, P)(f_loc.first, f_loc.second);
+    if (ends.empty()) {
+      cost += state.dcache.backward(end, P)(f_loc.first, f_loc.second);
+    } else {
+      cost += state.dcache.backward(ends, P)(f_loc.first, f_loc.second);
+    }
 
     max_power += nav.factories[factory_id].power;
     max_power =
@@ -206,6 +227,16 @@ struct ObjEstimate {
   }
 
   void reset() { *this = ObjEstimate{unit_id, end}; }
+};
+
+// TODO
+struct SelfDestructObj {
+  size_t unit_id;
+  int32_t step;
+  Loc end;
+
+  ObjEstimate obj{unit_id, end};
+  // bool estimate(AgentState& state, const NavState& nav) {}
 };
 
 struct MineObj {

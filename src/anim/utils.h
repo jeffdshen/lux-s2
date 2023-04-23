@@ -335,6 +335,37 @@ inline std::vector<std::vector<Loc>> get_factory_spots(
   return spots;
 }
 
+const std::vector<Loc> FACTORY_ADJACENT{
+    {-2, -1},
+    {-2, 0},
+    {-2, 1},
+    {-1, -2},
+    {-1, 2},
+    {0, -2},
+    {0, 2},
+    {1, -2},
+    {1, 2},
+    {2, -1},
+    {2, 0},
+    {2, 1}};
+inline std::vector<std::vector<Loc>> get_factory_adjacent(
+    const std::vector<lux::Factory>& factories, const Loc& bounds) {
+  std::vector<std::vector<Loc>> spots;
+  for (size_t i = 0; i < factories.size(); i++) {
+    auto& factory = factories[i];
+    spots.emplace_back();
+    spots.back().reserve(FACTORY_ADJACENT.size());
+    for (auto& n : FACTORY_ADJACENT) {
+      auto spot = add(to_loc(factory.pos), n);
+      if (!in_bounds(spot, bounds)) {
+        continue;
+      }
+      spots.back().emplace_back(std::move(spot));
+    }
+  }
+  return spots;
+}
+
 struct RubbleScores {
   Eigen::ArrayXXd value;
   std::vector<Loc> locs;
