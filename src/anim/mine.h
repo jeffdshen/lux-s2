@@ -780,7 +780,12 @@ inline void make_mine(AgentState& state) {
   std::unordered_map<Loc, size_t, LocHash> loc_count{MAX_SIZE * MAX_SIZE};
 
   {
+    size_t match_count = 0;
+    size_t retry_count = 0;
+    size_t execute_count = 0;
+    size_t fail_count = 0;
     while (!match.q.empty()) {
+      match_count++;
       auto [value, obj_id] = match.q.top();
       match.q.pop();
       auto& item = match.items[obj_id];
@@ -790,6 +795,7 @@ inline void make_mine(AgentState& state) {
         continue;
       }
       if (status == ObjStatus::RETRY) {
+        retry_count++;
         std::visit(
             [&, obj_id = obj_id](auto&& x) {
               bool success = x.estimate(state, nav);
@@ -803,12 +809,18 @@ inline void make_mine(AgentState& state) {
       std::visit(
           [&](auto&& x) {
             bool success = x.execute(state, nav);
+            execute_count++;
             if (success) {
               state.next_value[x.unit_id] += x.value / DISCOUNT;
+            } else {
+              fail_count++;
             }
           },
           item);
     }
+    LUX_INFO(
+        "match counts: " << match_count << ", " << retry_count << ", "
+                         << execute_count << ", " << fail_count);
   }
 
   // {
