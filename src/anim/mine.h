@@ -204,7 +204,18 @@ struct ObjEstimate {
   bool add_dig_turns(AgentState& state, const NavState& nav) {
     auto& unit = nav.units[unit_id];
     auto& unit_cfg = nav.get_unit_cfg(unit);
-    auto buffer = unit_cfg.MOVE_COST * 5.0;
+
+    double lichen =
+        state.team_lichen[state.opp_player].lichen(end.first, end.second);
+    double rubble = state.game.board.rubble(end.first, end.second);
+    bool is_ice = state.game.board.ice(end.first, end.second) == 1.0;
+    bool is_ore = state.game.board.ore(end.first, end.second) == 1.0;
+    double buffer = unit_cfg.MOVE_COST * 5.0;
+    if (lichen > 0.0) {
+      buffer = unit_cfg.MOVE_COST * 15.0;
+    } else if (!is_ice && !is_ore) {
+      buffer = unit_cfg.MOVE_COST * 10.0;
+    }
     auto dig_cost = unit_cfg.DIG_COST;
 
     dig_turns = std::floor((max_power - move_power - buffer) / dig_cost);
@@ -212,13 +223,8 @@ struct ObjEstimate {
       return false;
     }
 
-    double lichen =
-        state.team_lichen[state.opp_player].lichen(end.first, end.second);
     double lichen_turns = std::ceil(lichen / unit_cfg.DIG_LICHEN_REMOVED);
-    double rubble = state.game.board.rubble(end.first, end.second);
     double rubble_turns = std::ceil(rubble / unit_cfg.DIG_RUBBLE_REMOVED);
-    bool is_ice = state.game.board.ice(end.first, end.second) == 1.0;
-    bool is_ore = state.game.board.ore(end.first, end.second) == 1.0;
     if (!is_ice && !is_ore) {
       dig_turns = std::min(dig_turns, std::max(rubble_turns, lichen_turns));
     }

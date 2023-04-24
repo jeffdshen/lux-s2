@@ -208,7 +208,9 @@ inline void state_reset(
   state.dcache.add_cost("P1", p1 + EPS);
   state.dcache.add_cost("T0", p0 * EPS + 1);
   state.dcache.add_cost("T1", p1 * EPS + 1);
-  state.dcache.add_cost("R", state.game.board.rubble);
+  auto R = state.game.board.rubble + state.game.board.ice * 1000 +
+      state.game.board.ore * 1000 + EPS;
+  state.dcache.add_cost("R", R);
 
   state.factory_spots = get_factory_spots(state.game.factories[state.player]);
   state.enemy_adj = get_factory_adjacent(

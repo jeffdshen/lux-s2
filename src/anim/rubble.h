@@ -19,22 +19,23 @@ inline Eigen::ArrayXXd get_lichen_scores(AgentState& state) {
   Eigen::ArrayXXd scores = Eigen::ArrayXXd::Zero(rubble.rows(), rubble.cols());
   Eigen::ArrayXXd anti_scores =
       Eigen::ArrayXXd::Zero(rubble.rows(), rubble.cols());
-  auto cost_name = "T0";
 
+  double turns_left = state.env_cfg.max_episode_length - state.step;
+  double value = std::min<double>(turns_left, 400.0) / 1.5;
   for (auto& spots : state.factory_spots) {
-    auto& dist = state.dcache.backward(spots, cost_name);
-    // worth 400 at 1, 200 at 6, 400/3 at 11
-    auto& factory_score = (2 * 200.0 * 5) / (dist.floor() + 4);
-    auto& rubble_dist = state.dcache.backward(spots, "R");
-    scores = scores.max(factory_score - rubble_dist / 2.0 * 5.0);
+    auto& dist = state.dcache.backward(spots, "R");
+    auto [rubble_cost, rubble_dist] = unzipd(dist);
+    // worth X at 1, X * 2/3 at 6, X * 1/3 at 11, 0 at 16
+    auto& factory_score = (2 * value) * (16.0 - rubble_dist.floor()) / 15;
+    scores = scores.max(factory_score - rubble_cost / 2.0 * 5.0);
   }
 
   for (auto& spots : state.enemy_adj) {
-    auto& dist = state.dcache.backward(spots, cost_name);
-    // worth 400 at 1, 200 at 6, 400/3 at 11
-    auto& factory_score = (2 * 200.0 * 5) / (dist.floor() + 5);
-    auto& rubble_dist = state.dcache.backward(spots, "R");
-    anti_scores = anti_scores.max(factory_score - rubble_dist / 2.0 * 5.0);
+    auto& dist = state.dcache.backward(spots, "R");
+    auto [rubble_cost, rubble_dist] = unzipd(dist);
+    // worth X at 1, X * 2/3 at 6, X * 1/3 at 11, 0 at 16
+    auto& factory_score = (2 * value) * (16.0 - rubble_dist.floor()) / 15;
+    anti_scores = anti_scores.max(factory_score - rubble_cost / 2.0 * 5.0);
   }
   for (Eigen::Index i = 0; i < rubble.rows(); i++) {
     for (Eigen::Index j = 0; j < rubble.cols(); j++) {
