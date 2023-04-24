@@ -290,18 +290,29 @@ struct NavState {
       double min_power = unit.unit_type * 1000;
       Loc prev_loc = unit.loc;
 
-      for (size_t j = 0; j < 5; j++) {
-        for (auto& n : NEIGHBORS) {
-          auto action = lux::UnitAction::Move(to_dir(n), 0, 1);
-          if (!nav.check_update(i, action)) {
-            continue;
+      bool add_neighbors = true;
+      size_t danger_limit = 6;
+      if (state.step >= state.env_cfg.max_episode_length - 100) {
+        danger_limit = 1;
+      }
+      if (state.step >= state.env_cfg.max_episode_length - 50) {
+        add_neighbors = false;
+      }
+
+      for (size_t j = 0; j < danger_limit; j++) {
+        if (add_neighbors) {
+          for (auto& n : NEIGHBORS) {
+            auto action = lux::UnitAction::Move(to_dir(n), 0, 1);
+            if (!nav.check_update(i, action)) {
+              continue;
+            }
+            auto v = add(unit.loc, n);
+            double power = min_power;
+            power += nav.get_collision_power(unit, action);
+            power -= nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
+            TimeLoc tu{unit.step + 1 - nav.step, v};
+            my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
           }
-          auto v = add(unit.loc, n);
-          double power = min_power;
-          power += nav.get_collision_power(unit, action);
-          power -= nav.get_unit_cfg(unit).ACTION_QUEUE_POWER_COST;
-          TimeLoc tu{unit.step + 1 - nav.step, v};
-          my_nav.danger[tu] = std::max(my_nav.danger[tu], power);
         }
         {
           auto action = pop_action(actions);

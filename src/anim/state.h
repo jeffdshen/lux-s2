@@ -97,6 +97,8 @@ struct AgentState {
   std::vector<int64_t> water_costs;
   std::vector<double> free_factory_power;
   RubbleScores rubble_scores;
+  RubbleScores lichen_scores;
+  std::vector<TeamLichenTable> team_lichen;
   std::vector<double> prev_value;
   std::vector<double> next_value;
   std::unordered_map<std::string, double> mapped_value;
@@ -143,6 +145,45 @@ inline Eigen::ArrayXXd make_cost(
   return cost;
 }
 
+inline std::vector<TeamLichenTable> make_team_lichen(const AgentState& state) {
+  std::vector<TeamLichenTable> team_lichen;
+  auto& lichen = state.game.board.lichen;
+  auto& strains = state.game.board.lichen_strains;
+  for (size_t i = 0; i < 2; i++) {
+    auto zeros = Eigen::ArrayXXd::Zero(lichen.rows(), lichen.cols());
+    team_lichen.emplace_back();
+    team_lichen.back().lichen = zeros;
+    team_lichen.back().factory_id = zeros;
+  }
+  std::unordered_map<int32_t, size_t> to_team;
+  std::unordered_map<int32_t, size_t> to_factory;
+  for (size_t i = 0; i < 2; i++) {
+    for (size_t j = 0; j < state.game.factories[i].size(); j++) {
+      auto& factory = state.game.factories[i][j];
+      to_team[factory.strain_id] = i;
+      to_factory[factory.strain_id] = j;
+    }
+  }
+  for (Eigen::Index i = 0; i < lichen.rows(); i++) {
+    for (Eigen::Index j = 0; j < lichen.cols(); j++) {
+      if (strains(i, j) < 0) {
+        continue;
+      }
+
+      auto strain = static_cast<int32_t>(strains(i, j));
+      if (!to_team.contains(strain)) {
+        // weird, should never happen
+        continue;
+      }
+
+      auto& table = team_lichen[to_team.at(strain)];
+      table.lichen(i, j) = lichen(i, j);
+      table.factory_id(i, j) = to_factory[strain];
+    }
+  }
+  return team_lichen;
+}
+
 inline void state_reset(
     AgentState& state,
     const std::string& player,
@@ -167,6 +208,7 @@ inline void state_reset(
   state.dcache.add_cost("P1", p1 + EPS);
   state.dcache.add_cost("T0", p0 * EPS + 1);
   state.dcache.add_cost("T1", p1 * EPS + 1);
+  state.dcache.add_cost("R", state.game.board.rubble);
 
   state.factory_spots = get_factory_spots(state.game.factories[state.player]);
   state.enemy_adj = get_factory_adjacent(
@@ -184,6 +226,8 @@ inline void state_reset(
   }
   state.free_factory_power = {};
   state.rubble_scores = {};
+  state.lichen_scores = {};
+  state.team_lichen = make_team_lichen(state);
 
   state.prev_value = {};
   state.next_value = {};

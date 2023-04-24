@@ -404,6 +404,11 @@ inline lux::UnitAction pop_action(std::deque<lux::UnitAction>& actions) {
   return result;
 }
 
+struct TeamLichenTable {
+  Eigen::ArrayXXd lichen;
+  Eigen::ArrayXXd factory_id;
+};
+
 template <
     class result_t = std::chrono::milliseconds,
     class clock_t = std::chrono::steady_clock,

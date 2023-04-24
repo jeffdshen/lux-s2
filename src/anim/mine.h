@@ -35,6 +35,9 @@ constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_WATER_BONUS = {
 constexpr double POWER_PENALTY = 0.998;
 // TODO adjust based on lichen space
 // constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_SQUARE_PENALTY={};
+constexpr double LICHEN_VALUE = 1;
+constexpr double LICHEN_ENDGAME_VALUE = 2.5;
+constexpr double ENDGAME_PENALTY = 0.996;
 
 struct ObjEstimate {
   size_t unit_id;
@@ -209,21 +212,34 @@ struct ObjEstimate {
       return false;
     }
 
+    double lichen =
+        state.team_lichen[state.opp_player].lichen(end.first, end.second);
+    double lichen_turns = std::ceil(lichen / unit_cfg.DIG_LICHEN_REMOVED);
     double rubble = state.game.board.rubble(end.first, end.second);
     double rubble_turns = std::ceil(rubble / unit_cfg.DIG_RUBBLE_REMOVED);
     bool is_ice = state.game.board.ice(end.first, end.second) == 1.0;
     bool is_ore = state.game.board.ore(end.first, end.second) == 1.0;
     if (!is_ice && !is_ore) {
-      dig_turns = std::min(dig_turns, rubble_turns);
+      dig_turns = std::min(dig_turns, std::max(rubble_turns, lichen_turns));
     }
     rubble_turns = std::min(dig_turns, rubble_turns);
-    double rubble_cleared =
-        std::min(rubble, rubble_turns * unit_cfg.DIG_RUBBLE_REMOVED);
+    lichen_turns = std::min(dig_turns, lichen_turns);
     if (rubble > 0.0) {
+      double rubble_cleared =
+          std::min(rubble, rubble_turns * unit_cfg.DIG_RUBBLE_REMOVED);
       reward += rubble_cleared / rubble *
           state.rubble_scores.reward(end.first, end.second);
+    } else if (lichen > 0.0) {
+      double lichen_cleared =
+          std::min(lichen, lichen_turns * unit_cfg.DIG_LICHEN_REMOVED);
+      int64_t turns_left = state.env_cfg.max_episode_length - state.step;
+      double lichen_value =
+          LICHEN_ENDGAME_VALUE * std::pow(ENDGAME_PENALTY, turns_left);
+      lichen_value = std::max(lichen_value, LICHEN_VALUE);
+      reward += lichen_cleared * lichen_value;
     }
 
+    // mine for resources
     if (is_ice || is_ore) {
       double max_resource = unit_cfg.CARGO_SPACE;
       for (size_t i = 0; i < 4; i++) {
@@ -436,8 +452,6 @@ struct MineObj {
           auto action = lux::UnitAction::Dig(0, 1);
           size_t err = nav.repeat(unit_id, action, obj.dig_turns);
           if (err > 3) {
-            LUX_INFO(
-                "rev dig: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -469,6 +483,11 @@ struct MineObj {
           }
         }
       }
+    }
+
+    if (unit.step >= state.env_cfg.max_episode_length || unit.step - step > obj.move_turns + obj.dig_turns + 5) {
+      nav.revert(unit_id, step - nav.step);
+      return false;
     }
     return true;
   }
@@ -574,13 +593,16 @@ struct RubbleObj {
           auto action = lux::UnitAction::Dig(0, 1);
           size_t err = nav.repeat(unit_id, action, obj.dig_turns);
           if (err > 3) {
-            LUX_INFO(
-                "rev dig: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
         }
       }
+    }
+
+    if (unit.step >= state.env_cfg.max_episode_length || unit.step - step > obj.move_turns + obj.dig_turns + 5) {
+      nav.revert(unit_id, step - nav.step);
+      return false;
     }
     return true;
   }
@@ -702,7 +724,7 @@ inline void add_rubble_objs(
   auto& ice = state.game.board.ice;
   auto& ore = state.game.board.ore;
   auto& units = nav.units;
-  for (size_t i = 0; i < std::min<size_t>(40, locs.size()); i++) {
+  for (size_t i = 0; i < std::min<size_t>(60, locs.size()); i++) {
     auto& loc = locs[i];
     if (ice(loc.first, loc.second) > 0 || ore(loc.first, loc.second) > 0) {
       continue;
@@ -711,6 +733,52 @@ inline void add_rubble_objs(
     for (auto& unit : units) {
       size_t unit_id = unit.unit_id;
       int32_t step = unit.step;
+      {
+        RubbleObj obj{unit_id, step, loc, RubbleStage::MINE};
+        match.add(std::move(obj), state, nav);
+      }
+      {
+        RubbleObj obj{unit_id, step, loc, RubbleStage::PICKUP};
+        match.add(std::move(obj), state, nav);
+      }
+    }
+  }
+}
+
+inline void add_lichen_objs(
+    ObjMatch& match, AgentState& state, const NavState& nav) {
+  auto& locs = state.lichen_scores.locs;
+  auto& units = nav.units;
+  for (size_t i = 0; i < std::min<size_t>(60, locs.size()); i++) {
+    auto& loc = locs[i];
+    for (auto& unit : units) {
+      size_t unit_id = unit.unit_id;
+      int32_t step = unit.step;
+      {
+        RubbleObj obj{unit_id, step, loc, RubbleStage::MINE};
+        match.add(std::move(obj), state, nav);
+      }
+      {
+        RubbleObj obj{unit_id, step, loc, RubbleStage::PICKUP};
+        match.add(std::move(obj), state, nav);
+      }
+    }
+  }
+
+  auto& lichen = state.team_lichen[state.opp_player].lichen;
+  for (auto& unit : units) {
+    size_t unit_id = unit.unit_id;
+    int32_t step = unit.step;
+    auto nearby = NEIGHBORS;
+    nearby.emplace_back(0, 0);
+    for (auto& n : nearby) {
+      auto loc = add(unit.loc, n);
+      if (!in_bounds(loc, shape(lichen))) {
+        continue;
+      }
+      if (lichen(loc.first, loc.second) <= 0.0) {
+        continue;
+      }
       {
         RubbleObj obj{unit_id, step, loc, RubbleStage::MINE};
         match.add(std::move(obj), state, nav);
@@ -749,16 +817,40 @@ inline void add_avoid_objs(
   }
 }
 
+inline void execute_self_destructs(
+    ObjMatch&, AgentState& state, NavState& nav) {
+  if (state.step < state.env_cfg.max_episode_length - 4) {
+    return;
+  }
+
+  auto& units = nav.units;
+  auto& lichen = state.team_lichen[state.opp_player].lichen;
+  for (auto& unit : units) {
+    if (lichen(unit.loc.first, unit.loc.second) <= 0.0) {
+      continue;
+    }
+
+    size_t unit_id = unit.unit_id;
+    {
+      auto action = lux::UnitAction::SelfDestruct(0, 1);
+      nav.update(unit_id, action);
+    }
+  }
+}
+
 inline void make_mine(AgentState& state) {
   ObjMatch match;
   auto nav = NavState::from_agent_state(state);
 
   {
     add_rubble_scores(state);
+    add_lichen_scores(state);
     add_mine_objs(match, state, nav);
     add_rubble_objs(match, state, nav);
     // add_prev_objs(match, state, nav);
     add_avoid_objs(match, state, nav);
+    add_lichen_objs(match, state, nav);
+    execute_self_destructs(match, state, nav);
   }
   auto factories = state.game.factories[state.player];
 
