@@ -407,8 +407,6 @@ struct MineObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO(
-                "rev pick: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -430,8 +428,6 @@ struct MineObj {
           auto [_, locs] = go_to(nav, unit_id, end, cost, h);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO(
-                "rev mine: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -456,9 +452,6 @@ struct MineObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO(
-                "rev return: " << err << ", "
-                               << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -486,10 +479,8 @@ struct MineObj {
     }
 
     if (stage != MineStage::RETURN) {
-      for (int32_t i = 0; i < nav.max_turns; i++) {
-        if (nav.occupied.contains({i, end})) {
-          return ObjStatus::INVALID;
-        }
+      if (get_default(nav.usage_map, end, 0) >= 3) {
+        return ObjStatus::INVALID;
       }
     }
 
@@ -554,8 +545,6 @@ struct RubbleObj {
           auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO(
-                "rev pick: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -577,8 +566,6 @@ struct RubbleObj {
           auto [_, locs] = go_to(nav, unit_id, end, cost, h);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
-            LUX_INFO(
-                "rev mine: " << err << ", " << state.my_unit(unit_id).unit_id);
             nav.revert(unit_id, step - nav.step);
             return false;
           }
@@ -603,10 +590,8 @@ struct RubbleObj {
       return ObjStatus::INVALID;
     }
 
-    for (int32_t i = 0; i < nav.max_turns; i++) {
-      if (nav.occupied.contains({i, end})) {
-        return ObjStatus::INVALID;
-      }
+    if (get_default(nav.usage_map, end, 0) >= 3) {
+      return ObjStatus::INVALID;
     }
 
     if (stage == RubbleStage::PICKUP &&
@@ -777,8 +762,6 @@ inline void make_mine(AgentState& state) {
   }
   auto factories = state.game.factories[state.player];
 
-  std::unordered_map<Loc, size_t, LocHash> loc_count{MAX_SIZE * MAX_SIZE};
-
   {
     size_t match_count = 0;
     size_t retry_count = 0;
@@ -820,7 +803,8 @@ inline void make_mine(AgentState& state) {
     }
     LUX_INFO(
         "match counts: " << match_count << ", " << retry_count << ", "
-                         << execute_count << ", " << fail_count);
+                         << execute_count << ", " << fail_count << "; "
+                         << nav.total_expanded);
   }
 
   // {

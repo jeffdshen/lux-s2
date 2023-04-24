@@ -119,12 +119,41 @@ struct NavState {
   std::vector<std::vector<double>> power_cycles;
   std::vector<std::vector<double>> day_powers;
   int32_t max_turns = 100;
-  int32_t search_limit = 2000;
+  int32_t search_limit = 4000;
+  int32_t avg_limit = 100;
+  int32_t min_limit = 50;
+  std::unordered_map<Loc, int32_t, LocHash> usage_map{MAX_SIZE * MAX_SIZE};
   OccupiedMap occupied{MAX_SIZE * MAX_SIZE * 100};
   DangerMap danger{MAX_SIZE * MAX_SIZE * 100};
   std::vector<std::vector<lux::UnitAction>> actions;
   std::vector<std::vector<UnitState>> history;
+  std::vector<std::unordered_set<std::string>> search_errors;
+  std::vector<int32_t> expanded;
+  int32_t total_expanded = 0;
   bool is_enemy = false;
+
+  void add_expanded(size_t unit_id, size_t amt) {
+    expanded[unit_id] += amt;
+    total_expanded += amt;
+  }
+
+  int32_t get_search_limit(size_t unit_id) const {
+    int32_t limit = search_limit;
+    for (int32_t i = 0; i < expanded[unit_id]; i += search_limit / 2) {
+      limit /= 2;
+      if (limit < min_limit) {
+        break;
+      }
+    }
+    for (int32_t i = 0; i < total_expanded; i += avg_limit * units.size()) {
+      limit /= 2;
+      if (limit < min_limit) {
+        break;
+      }
+    }
+    limit = std::max(limit, min_limit);
+    return limit;
+  }
 
   const lux::UnitConfig& get_unit_cfg(size_t unit_type) const {
     return cost_table.unit_cfgs[unit_type];
@@ -221,6 +250,7 @@ struct NavState {
     for (size_t i = 0; i < nav.units.size(); i++) {
       nav.history[i].emplace_back(nav.units[i]);
     }
+    nav.expanded.resize(nav.units.size());
     if (!is_enemy) {
       add_danger(nav, state);
     }
@@ -245,6 +275,7 @@ struct NavState {
       unit.resources = {0.0, 0.0, 0.0, 0.0, power};
       TimeLoc ts{1, unit.loc};
       nav.occupied[ts] = unit;
+      nav.usage_map[unit.loc]++;
     }
   }
 
@@ -393,6 +424,7 @@ struct NavState {
     unit.r_at(action.resource) -= cost_table.get_cargo_cost(action);
     TimeLoc ts{unit.step - step, unit.loc};
     occupied[ts] = unit;
+    usage_map[unit.loc]++;
     actions[unit_id].emplace_back(action);
     history[unit_id].emplace_back(unit);
     return true;
@@ -414,6 +446,7 @@ struct NavState {
         auto& unit = hist[t];
         TimeLoc ts{unit.step - step, unit.loc};
         occupied.erase(ts);
+        usage_map[unit.loc]--;
       }
 
       units[unit_id] = hist[t - 1];
@@ -575,19 +608,17 @@ inline std::vector<std::pair<double, TimeLoc>> get_next_gs(
 }
 
 template <class E, class G>
-std::pair<double, std::vector<Loc>> a_star(
+std::pair<size_t, std::pair<double, std::vector<Loc>>> a_star(
     const TimeLoc& start,
     E end_func,
     int32_t max_turns,
     int32_t search_limit,
     const Eigen::ArrayXXd& h,
     G next_g_func) {
-  std::unordered_map<TimeLoc, TimeLoc, TimeLocHash> came_from(
-      MAX_SIZE * MAX_SIZE * max_turns);
-  std::unordered_set<TimeLoc, TimeLocHash> seen(
-      MAX_SIZE * MAX_SIZE * max_turns);
-  TimeLocCosts g(MAX_SIZE * MAX_SIZE * max_turns);
-  TimeLocCosts f(MAX_SIZE * MAX_SIZE * max_turns);
+  std::unordered_map<TimeLoc, TimeLoc, TimeLocHash> came_from(search_limit);
+  std::unordered_set<TimeLoc, TimeLocHash> seen(search_limit);
+  TimeLocCosts g(search_limit);
+  TimeLocCosts f(search_limit);
 
   double start_h = h(start.second.first, start.second.second);
   g[start] = 0.0;
@@ -602,7 +633,7 @@ std::pair<double, std::vector<Loc>> a_star(
     q.pop();
     auto& [t, u] = tu;
     if (end_func(tu)) {
-      return {g[tu], trace_path(came_from, tu)};
+      return {expanded, {g[tu], trace_path(came_from, tu)}};
     }
     if (seen.contains(tu)) {
       continue;
@@ -612,8 +643,7 @@ std::pair<double, std::vector<Loc>> a_star(
       continue;
     }
     if (expanded >= search_limit) {
-      LUX_INFO("search limit");
-      return {INF, {}};
+      return {expanded, {INF, {}}};
     }
     expanded++;
     auto next_gs = next_g_func(tu, g);
@@ -631,10 +661,10 @@ std::pair<double, std::vector<Loc>> a_star(
       q.emplace(next_f, tv);
     }
   }
-  return {INF, {}};
+  return {expanded, {INF, {}}};
 }
 
-inline std::pair<double, std::vector<Loc>> avoid(
+inline std::pair<size_t, std::pair<double, std::vector<Loc>>> avoid_(
     const NavState& state,
     size_t unit_id,
     const int32_t turns,
@@ -663,10 +693,25 @@ inline std::pair<double, std::vector<Loc>> avoid(
         state.danger);
   };
   return a_star(
-      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
+      start,
+      end_func,
+      state.max_turns,
+      state.get_search_limit(unit_id),
+      h,
+      next_g_func);
 }
 
-inline std::pair<double, std::vector<Loc>> go_any(
+inline std::pair<double, std::vector<Loc>> avoid(
+    NavState& state,
+    size_t unit_id,
+    const int32_t turns,
+    const Eigen::ArrayXXd& cost) {
+  auto res = avoid_(state, unit_id, turns, cost);
+  state.add_expanded(unit_id, res.first);
+  return std::move(res.second);
+}
+
+inline std::pair<size_t, std::pair<double, std::vector<Loc>>> go_any_(
     const NavState& state,
     size_t unit_id,
     const std::vector<Loc>& ends,
@@ -679,7 +724,7 @@ inline std::pair<double, std::vector<Loc>> go_any(
   double power = min_power + unit.r_at(lux::Resource::POWER);
   auto& power_cycle = state.power_cycles[unit.unit_type];
 
-  std::unordered_set<Loc, LocHash> ends_set(MAX_SIZE * MAX_SIZE);
+  std::unordered_set<Loc, LocHash> ends_set;
   for (auto& end : ends) {
     ends_set.emplace(end);
   }
@@ -709,10 +754,27 @@ inline std::pair<double, std::vector<Loc>> go_any(
         state.danger);
   };
   return a_star(
-      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
+      start,
+      end_func,
+      state.max_turns,
+      state.get_search_limit(unit_id),
+      h,
+      next_g_func);
 }
 
-inline std::pair<double, std::vector<Loc>> go_to(
+inline std::pair<double, std::vector<Loc>> go_any(
+    NavState& state,
+    size_t unit_id,
+    const std::vector<Loc>& ends,
+    const Eigen::ArrayXXd& cost,
+    const Eigen::ArrayXXd& h,
+    size_t stay = 0) {
+  auto res = go_any_(state, unit_id, ends, cost, h, stay);
+  state.add_expanded(unit_id, res.first);
+  return std::move(res.second);
+}
+
+inline std::pair<size_t, std::pair<double, std::vector<Loc>>> go_to_(
     const NavState& state,
     size_t unit_id,
     const Loc& end,
@@ -751,6 +813,24 @@ inline std::pair<double, std::vector<Loc>> go_to(
         state.danger);
   };
   return a_star(
-      start, end_func, state.max_turns, state.search_limit, h, next_g_func);
+      start,
+      end_func,
+      state.max_turns,
+      state.get_search_limit(unit_id),
+      h,
+      next_g_func);
 }
+
+inline std::pair<double, std::vector<Loc>> go_to(
+    NavState& state,
+    size_t unit_id,
+    const Loc& end,
+    const Eigen::ArrayXXd& cost,
+    const Eigen::ArrayXXd& h,
+    size_t stay = 0) {
+  auto res = go_to_(state, unit_id, end, cost, h, stay);
+  state.add_expanded(unit_id, res.first);
+  return std::move(res.second);
+}
+
 } // namespace anim

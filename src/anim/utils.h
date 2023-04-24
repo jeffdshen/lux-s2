@@ -12,7 +12,7 @@
 #include "anim/lux.h"
 
 namespace anim {
-const int MAX_SIZE = 64;
+const int MAX_SIZE = 63;
 const double INF = std::numeric_limits<double>::infinity();
 const double EPS = 0x1.0p-20;
 
@@ -411,4 +411,20 @@ template <
 auto since(std::chrono::time_point<clock_t, duration_t> const& start) {
   return std::chrono::duration_cast<result_t>(clock_t::now() - start);
 }
+
+class DurationTimer {
+ public:
+  DurationTimer(std::string name)
+      : name_(std::move(name)), start_(std::chrono::steady_clock::now()) {}
+  ~DurationTimer() {
+    auto end = std::chrono::steady_clock::now();
+    auto dur =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - start_);
+    LUX_INFO(name_ << ": " << dur.count() / 1000.0 << " seconds");
+  }
+
+ private:
+  std::string name_;
+  std::chrono::time_point<std::chrono::steady_clock> start_;
+};
 } // namespace anim
