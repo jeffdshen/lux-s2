@@ -75,7 +75,7 @@ inline Eigen::ArrayXXd get_enemy_lichen_scores(AgentState& state) {
 
   for (auto& spots : state.enemy_adj) {
     auto& dist = state.dcache.backward(spots, cost_name);
-    scores = scores.min(dist.floor());
+    scores = scores.min(dist.floor() * 21.0);
   }
   scores += lichen;
   for (Eigen::Index i = 0; i < lichen.rows(); i++) {

@@ -243,6 +243,9 @@ struct ObjEstimate {
           LICHEN_ENDGAME_VALUE * std::pow(ENDGAME_PENALTY, turns_left);
       lichen_value = std::max(lichen_value, LICHEN_VALUE);
       reward += lichen_cleared * lichen_value;
+      double power_refund = (dig_turns * dig_cost + move_power) *
+          std::pow(ENDGAME_PENALTY, turns_left);
+      reward += power_refund;
     }
 
     // mine for resources
@@ -491,7 +494,8 @@ struct MineObj {
       }
     }
 
-    if (unit.step >= state.env_cfg.max_episode_length || unit.step - step > obj.move_turns + obj.dig_turns + 5) {
+    if (unit.step >= state.env_cfg.max_episode_length ||
+        unit.step - step > obj.move_turns + obj.dig_turns + 5) {
       nav.revert(unit_id, step - nav.step);
       return false;
     }
@@ -606,7 +610,8 @@ struct RubbleObj {
       }
     }
 
-    if (unit.step >= state.env_cfg.max_episode_length || unit.step - step > obj.move_turns + obj.dig_turns + 5) {
+    if (unit.step >= state.env_cfg.max_episode_length ||
+        unit.step - step > obj.move_turns + obj.dig_turns + 5) {
       nav.revert(unit_id, step - nav.step);
       return false;
     }
@@ -730,7 +735,11 @@ inline void add_rubble_objs(
   auto& ice = state.game.board.ice;
   auto& ore = state.game.board.ore;
   auto& units = nav.units;
-  for (size_t i = 0; i < std::min<size_t>(60, locs.size()); i++) {
+  size_t size_limit = 60;
+  if (state.step > state.env_cfg.max_episode_length - 200) {
+    size_limit = 30;
+  }
+  for (size_t i = 0; i < std::min<size_t>(size_limit, locs.size()); i++) {
     auto& loc = locs[i];
     if (ice(loc.first, loc.second) > 0 || ore(loc.first, loc.second) > 0) {
       continue;
@@ -755,7 +764,11 @@ inline void add_lichen_objs(
     ObjMatch& match, AgentState& state, const NavState& nav) {
   auto& locs = state.lichen_scores.locs;
   auto& units = nav.units;
-  for (size_t i = 0; i < std::min<size_t>(60, locs.size()); i++) {
+  size_t size_limit = 60;
+  if (state.step > state.env_cfg.max_episode_length - 200) {
+    size_limit = 120;
+  }
+  for (size_t i = 0; i < std::min<size_t>(size_limit, locs.size()); i++) {
     auto& loc = locs[i];
     for (auto& unit : units) {
       size_t unit_id = unit.unit_id;
