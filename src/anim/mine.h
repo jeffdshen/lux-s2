@@ -18,6 +18,8 @@ const double WATER_DISCOUNT = 0.996;
 
 enum class RubbleStage { PICKUP, MINE };
 
+enum class AttackStage { PICKUP, ATTACK };
+
 enum class MineStage { EARLY_RETURN, PICKUP, MINE, RETURN };
 
 enum class ObjStatus { INVALID, RETRY, VALID };
@@ -27,10 +29,10 @@ std::string get_cost_name(const std::string& s, const UnitState& unit) {
 }
 
 constexpr std::array<double, MAX_RESOURCE_TYPE> DEFAULT_RESOURCE_VALUE = {
-    12.0, 10, 5.0 * 4.0, 10 * 5.0, 0.0};
+    5.0, 8, 5.0 * 4.0, 8 * 5.0, 0.0};
 constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_WATER_BONUS = {
     12.5, 0.0, 12.5 * 4.0, 0.0, 0.0};
-constexpr double POWER_PENALTY = 0.995;
+constexpr double POWER_PENALTY = 0.998;
 // TODO adjust based on lichen space
 // constexpr std::array<double, MAX_RESOURCE_TYPE> LOW_SQUARE_PENALTY={};
 
@@ -48,10 +50,23 @@ struct ObjEstimate {
   double value = 0;
   std::array<double, MAX_RESOURCE_TYPE> resources = {0};
 
-  void add_unzipd(double cost) {
-    auto [power, turns] = unzipd(cost);
+  bool add(
+      double power,
+      double turns,
+      const NavState& nav,
+      bool out_of_order = false) {
     move_power += power;
+    bool res = move_power + power <= max_power;
+    if (!out_of_order) {
+      max_power += nav.get_power_gain(unit_id, move_turns, move_turns + turns);
+    }
     move_turns += turns;
+    return res;
+  }
+
+  bool add_unzipd(double cost, const NavState& nav, bool out_of_order = false) {
+    auto [power, turns] = unzipd(cost);
+    return add(power, turns, nav, out_of_order);
   }
 
   bool init_unit(AgentState&, const NavState& nav) {
@@ -92,28 +107,39 @@ struct ObjEstimate {
     auto P = get_cost_name("P", unit);
     Loc f_loc = to_loc(state.game.factories[state.player][factory_id].pos);
 
-    double cost = 0.0;
-    auto& factory_spots = state.factory_spots[factory_id];
-    cost += state.dcache.backward(factory_spots, P)(loc.first, loc.second);
-    if (unzipd(cost).first > max_power) {
-      return false;
-    }
-    if (ends.empty()) {
-      cost += state.dcache.backward(end, P)(f_loc.first, f_loc.second);
-    } else {
-      cost += state.dcache.backward(ends, P)(f_loc.first, f_loc.second);
+    {
+      auto& factory_spots = state.factory_spots[factory_id];
+      double cost =
+          state.dcache.backward(factory_spots, P)(loc.first, loc.second);
+      if (!add_unzipd(cost, nav)) {
+        return false;
+      }
     }
 
-    max_power += nav.factories[factory_id].power;
-    max_power =
-        std::min(max_power, static_cast<double>(unit_cfg.BATTERY_CAPACITY));
-
-    pickup_power = max_power - unit.r_at(lux::Resource::POWER);
+    {
+      max_power += nav.factories[factory_id].power;
+      max_power = std::min(
+          max_power,
+          static_cast<double>(unit_cfg.BATTERY_CAPACITY) + move_power);
+    }
+    pickup_power = max_power - unit.r_at(lux::Resource::POWER) - move_power;
     if (pickup_power <= 10 * unit_cfg.ACTION_QUEUE_POWER_COST) {
       return false;
     }
-    add_unzipd(cost);
-    move_turns += 1.0;
+
+    add(0, 1, nav);
+    {
+      double cost = 0.0;
+      if (ends.empty()) {
+        cost += state.dcache.backward(end, P)(f_loc.first, f_loc.second);
+      } else {
+        cost += state.dcache.backward(ends, P)(f_loc.first, f_loc.second);
+      }
+      if (!add_unzipd(cost, nav)) {
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -122,7 +148,9 @@ struct ObjEstimate {
     auto& loc = unit.loc;
     auto P = get_cost_name("P", unit);
     double cost = state.dcache.backward(end, P)(loc.first, loc.second);
-    add_unzipd(cost);
+    if (!add_unzipd(cost, nav)) {
+      return false;
+    }
     return true;
   }
 
@@ -131,14 +159,14 @@ struct ObjEstimate {
     auto P = get_cost_name("P", unit);
     auto& zone = state.zcache.get_zone("FACTORY_SPOT", P);
     double cost = zone.dist(end.first, end.second);
-    add_unzipd(cost);
+    add_unzipd(cost, nav, true);
     return true;
   }
 
   bool add_dropoff(
       AgentState&, const NavState& nav, lux::Resource resource_type) {
     size_t i = static_cast<size_t>(resource_type);
-    move_turns += 1;
+    add(0, 1, nav);
     double r = resources[i] * DEFAULT_RESOURCE_VALUE[i];
     {
       double water = nav.factories[factory_id].water;
@@ -229,15 +257,87 @@ struct ObjEstimate {
   void reset() { *this = ObjEstimate{unit_id, end}; }
 };
 
-// TODO
-struct SelfDestructObj {
+struct PrevObj {
   size_t unit_id;
   int32_t step;
-  Loc end;
 
-  ObjEstimate obj{unit_id, end};
-  // bool estimate(AgentState& state, const NavState& nav) {}
+  double value = 0.0;
+  bool estimate(AgentState& state, const NavState&) {
+    value = state.prev_value[unit_id];
+    if (value <= 0) {
+      return false;
+    }
+    return true;
+  }
+
+  bool execute(AgentState& state, NavState& nav) {
+    auto& unit = state.my_unit(unit_id);
+    std::deque<lux::UnitAction> actions{
+        unit.action_queue.begin(), unit.action_queue.end()};
+
+    if (actions.empty()) {
+      return false;
+    }
+    for (size_t i = 0; i < 100 && !actions.empty(); i++) {
+      auto action = pop_action(actions);
+      if (!nav.update(unit_id, action)) {
+        nav.revert(unit_id, step - nav.step);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  ObjStatus get_status(const AgentState&, const NavState& nav) const {
+    if (step != nav.units[unit_id].step) {
+      return ObjStatus::INVALID;
+    }
+
+    return ObjStatus::VALID;
+  }
 };
+
+// TODO
+// struct AttackObj {
+//   size_t unit_id;
+//   int32_t step;
+//   Loc end;
+
+//   // cached values
+//   ObjEstimate obj{unit_id, end};
+//   double value = 0.0;
+//   bool estimate(AgentState& state, const NavState& nav) {
+//     obj.reset();
+//     obj.init_unit(state, nav);
+//     obj.set_factory_id(state, nav, true);
+
+//     switch (stage) {
+//       case AttackStage::PICKUP: {
+//         if (!obj.add_pickup(state, nav)) {
+//           return false;
+//         }
+//         break;
+//       }
+//       case AttackStage::ATTACK: {
+//         if (!obj.add_goto(state, nav)) {
+//           return false;
+//         }
+//         break;
+//       }
+//     }
+//     // TODO
+//     if (!obj.add_dig_turns(state, nav)) {
+//       return false;
+//     }
+
+//     value = obj.get_value(state, nav);
+//     if (value <= 0) {
+//       return false;
+//     }
+//     return true;
+//   }
+// };
 
 struct MineObj {
   size_t unit_id;
@@ -304,7 +404,7 @@ struct MineObj {
         {
           auto& factory_spots = state.factory_spots[obj.factory_id];
           auto& h = state.dcache.backward(factory_spots, P);
-          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
+          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
@@ -353,7 +453,7 @@ struct MineObj {
         {
           auto& factory_spots = state.factory_spots[obj.factory_id];
           auto& h = state.dcache.backward(factory_spots, P);
-          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
+          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
@@ -451,7 +551,7 @@ struct RubbleObj {
         {
           auto& factory_spots = state.factory_spots[obj.factory_id];
           auto& h = state.dcache.backward(factory_spots, P);
-          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h);
+          auto [_, locs] = go_any(nav, unit_id, factory_spots, cost, h, 1);
           size_t err = nav.apply_moves(unit_id, locs);
           if (err > 0) {
             LUX_INFO(
@@ -543,26 +643,21 @@ struct AvoidObj {
     return true;
   }
 
-  ObjStatus get_status(const AgentState&, const NavState&) {
+  ObjStatus get_status(const AgentState&, const NavState& nav) {
+    if (step != nav.units[unit_id].step) {
+      return ObjStatus::INVALID;
+    }
     return ObjStatus::VALID;
   }
 };
 
-using ObjItem = std::variant<MineObj, RubbleObj, AvoidObj>;
+using ObjItem = std::variant<MineObj, RubbleObj, AvoidObj, PrevObj>;
 struct ObjMatch {
   std::vector<ObjItem> items;
   std::priority_queue<std::pair<double, size_t>> q;
 
-  void add(MineObj obj, AgentState& state, const NavState& nav) {
-    bool success = obj.estimate(state, nav);
-    if (!success) {
-      return;
-    }
-    q.push({obj.value, items.size()});
-    items.emplace_back(std::move(obj));
-  }
-
-  void add(RubbleObj obj, AgentState& state, const NavState& nav) {
+  template <class Obj>
+  void add(Obj obj, AgentState& state, const NavState& nav) {
     bool success = obj.estimate(state, nav);
     if (!success) {
       return;
@@ -622,7 +717,7 @@ inline void add_rubble_objs(
   auto& ice = state.game.board.ice;
   auto& ore = state.game.board.ore;
   auto& units = nav.units;
-  for (size_t i = 0; i < std::min<size_t>(60, locs.size()); i++) {
+  for (size_t i = 0; i < std::min<size_t>(40, locs.size()); i++) {
     auto& loc = locs[i];
     if (ice(loc.first, loc.second) > 0 || ore(loc.first, loc.second) > 0) {
       continue;
@@ -643,6 +738,32 @@ inline void add_rubble_objs(
   }
 }
 
+inline void add_prev_objs(
+    ObjMatch& match, AgentState& state, const NavState& nav) {
+  auto& units = nav.units;
+  for (auto& unit : units) {
+    size_t unit_id = unit.unit_id;
+    int32_t step = unit.step;
+    {
+      PrevObj obj{unit_id, step};
+      match.add(std::move(obj), state, nav);
+    }
+  }
+}
+
+inline void add_avoid_objs(
+    ObjMatch& match, AgentState& state, const NavState& nav) {
+  auto& units = nav.units;
+  for (auto& unit : units) {
+    size_t unit_id = unit.unit_id;
+    int32_t step = unit.step;
+    {
+      AvoidObj obj{unit_id, step, 10};
+      match.add(std::move(obj), state, nav);
+    }
+  }
+}
+
 inline void make_mine(AgentState& state) {
   ObjMatch match;
   auto nav = NavState::from_agent_state(state);
@@ -651,6 +772,8 @@ inline void make_mine(AgentState& state) {
     add_rubble_scores(state);
     add_mine_objs(match, state, nav);
     add_rubble_objs(match, state, nav);
+    // add_prev_objs(match, state, nav);
+    add_avoid_objs(match, state, nav);
   }
   auto factories = state.game.factories[state.player];
 
@@ -677,17 +800,25 @@ inline void make_mine(AgentState& state) {
             item);
         continue;
       }
-      std::visit([&](auto&& x) { return x.execute(state, nav); }, item);
+      std::visit(
+          [&](auto&& x) {
+            bool success = x.execute(state, nav);
+            if (success) {
+              state.next_value[x.unit_id] += x.value / DISCOUNT;
+            }
+          },
+          item);
     }
   }
 
-  {
-    auto& units = nav.units;
-    for (auto& unit : units) {
-      AvoidObj o{unit.unit_id, unit.step, 10};
-      o.execute(state, nav);
-    }
-  }
+  // {
+  //   auto& units = nav.units;
+  //   for (auto& unit : units) {
+  //     AvoidObj o{unit.unit_id, unit.step, 10};
+  //     o.execute(state, nav);
+  //   }
+  // }
   set_action_queue(state, nav);
+  state.add_mapped_value();
 }
 } // namespace anim

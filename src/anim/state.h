@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -96,6 +97,9 @@ struct AgentState {
   std::vector<int64_t> water_costs;
   std::vector<double> free_factory_power;
   RubbleScores rubble_scores;
+  std::vector<double> prev_value;
+  std::vector<double> next_value;
+  std::unordered_map<std::string, double> mapped_value;
 
   json get_actions_json() {
     json res = json::object();
@@ -117,6 +121,12 @@ struct AgentState {
   lux::Unit& my_unit(size_t i) { return my_units()[i]; }
 
   const lux::Unit& my_unit(size_t i) const { return my_units()[i]; }
+
+  void add_mapped_value() {
+    for (size_t i = 0; i < next_value.size(); i++) {
+      mapped_value[my_unit(i).unit_id] = next_value[i];
+    }
+  }
 };
 
 inline Eigen::ArrayXXd make_cost(
@@ -174,6 +184,15 @@ inline void state_reset(
   }
   state.free_factory_power = {};
   state.rubble_scores = {};
+
+  state.prev_value = {};
+  state.next_value = {};
+  auto& units = state.game.units[state.player];
+  for (size_t i = 0; i < units.size(); i++) {
+    state.prev_value.emplace_back(state.mapped_value[units[i].unit_id]);
+    state.next_value.emplace_back(0.0);
+  }
+  state.mapped_value = {};
 }
 
 } // namespace anim

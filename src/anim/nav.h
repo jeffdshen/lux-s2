@@ -134,6 +134,15 @@ struct NavState {
     return cost_table.unit_cfgs[unit.unit_type];
   }
 
+  double get_power_gain(
+      size_t unit_id, int32_t start_turns, int32_t end_turns) const {
+    auto& unit = units[unit_id];
+    size_t start_time = start_turns + unit.step - step;
+    size_t end_time = end_turns + unit.step - step;
+    return power_cycles[unit.unit_type][end_time] -
+        power_cycles[unit.unit_type][start_time];
+  }
+
   static NavState from_agent_state(
       const AgentState& state, bool is_enemy = false) {
     NavState nav;
@@ -662,7 +671,8 @@ inline std::pair<double, std::vector<Loc>> go_any(
     size_t unit_id,
     const std::vector<Loc>& ends,
     const Eigen::ArrayXXd& cost,
-    const Eigen::ArrayXXd& h) {
+    const Eigen::ArrayXXd& h,
+    size_t stay = 0) {
   auto& unit = state.units[unit_id];
   TimeLoc start = {unit.step - state.step, unit.loc};
   double min_power = unit.unit_type * 1000;
@@ -674,7 +684,16 @@ inline std::pair<double, std::vector<Loc>> go_any(
     ends_set.emplace(end);
   }
   auto end_func = [&](const TimeLoc& tu) {
-    return ends_set.contains(tu.second);
+    if (!ends_set.contains(tu.second)) {
+      return false;
+    }
+
+    for (size_t i = 1; i <= stay; i++) {
+      if (state.occupied.contains({tu.first + i, tu.second})) {
+        return false;
+      }
+    }
+    return true;
   };
 
   auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
@@ -698,14 +717,26 @@ inline std::pair<double, std::vector<Loc>> go_to(
     size_t unit_id,
     const Loc& end,
     const Eigen::ArrayXXd& cost,
-    const Eigen::ArrayXXd& h) {
+    const Eigen::ArrayXXd& h,
+    size_t stay = 0) {
   auto& unit = state.units[unit_id];
   TimeLoc start = {unit.step - state.step, unit.loc};
   double min_power = unit.unit_type * 1000;
   double power = min_power + unit.r_at(lux::Resource::POWER);
   auto& power_cycle = state.power_cycles[unit.unit_type];
 
-  auto end_func = [&](const TimeLoc& tu) { return tu.second == end; };
+  auto end_func = [&](const TimeLoc& tu) {
+    if (tu.second != end) {
+      return false;
+    }
+
+    for (size_t i = 1; i <= stay; i++) {
+      if (state.occupied.contains({tu.first + i, tu.second})) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   auto next_g_func = [&](const TimeLoc& tu, const TimeLocCosts& g) {
     return get_next_gs(
